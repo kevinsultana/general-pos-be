@@ -1,0 +1,769 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum BusinessType {
+  GENERAL
+  RESTAURANT
+}
+
+enum TransactionStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum PaymentMethodType {
+  CASH
+  QRIS
+  TRANSFER
+  DEBIT
+  CREDIT
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  VOIDED
+}
+
+enum RefundStatus {
+  COMPLETED
+  VOIDED
+}
+
+enum StockMovementType {
+  INITIAL
+  STOCK_IN
+  SALE
+  ADJUSTMENT
+  CANCEL_REVERSAL
+  REFUND_REVERSAL
+}
+
+enum PromotionConditionType {
+  MIN_PURCHASE
+  PRODUCT_REQUIRED
+  PRODUCT_COMBINATION
+}
+
+enum PrinterRole {
+  RECEIPT
+  KITCHEN
+}
+
+enum PrinterConnectionType {
+  BLUETOOTH
+  USB
+  NETWORK
+}
+
+enum PrinterPaperSize {
+  PAPER_58MM
+  PAPER_80MM
+}
+
+enum CashRoundingMode {
+  ROUND_NEAREST
+  ROUND_UP
+  ROUND_DOWN
+}
+
+enum SyncOperation {
+  CREATE
+  UPDATE
+  DELETE
+  EVENT
+}
+
+enum SyncStatus {
+  PENDING
+  PROCESSING
+  SYNCED
+  FAILED
+  CONFLICT
+}
+
+enum SubscriptionPlan {
+  FREE
+  PAID
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+// ============================================================
+// STORE
+// ============================================================
+
+model Store {
+  id             String       @id @default(uuid()) @db.Uuid
+  name           String
+  ownerName      String?
+  address        String?
+  phone          String?
+  email          String?
+  logoReference  String?
+
+  currency       String       @default("IDR")
+  timezone       String       @default("Asia/Jakarta")
+  language       String       @default("id")
+
+  businessType   BusinessType @default(GENERAL)
+
+  customerEnabled         Boolean          @default(false)
+  draftEnabled            Boolean          @default(false)
+  splitPaymentEnabled     Boolean          @default(false)
+  refundEnabled           Boolean          @default(false)
+  partialRefundEnabled    Boolean          @default(false)
+  restaurantEnabled       Boolean          @default(false)
+  kitchenPrintingEnabled  Boolean          @default(false)
+  cashRoundingEnabled     Boolean          @default(false)
+  cashRoundingIncrement   Int              @default(100)
+  cashRoundingMode        CashRoundingMode @default(ROUND_NEAREST)
+
+  subscriptionPlan        SubscriptionPlan   @default(PRO)
+  subscriptionStatus      SubscriptionStatus @default(ACTIVE)
+  subscriptionExpiresAt   DateTime?          @db.Timestamptz(3)
+
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(3)
+
+
+  users          User[]
+  categories     Category[]
+  products       Product[]
+  customers      Customer[]
+  transactions   Transaction[]
+  paymentMethods PaymentMethod[]
+  promotions     Promotion[]
+  printers       Printer[]
+  auditLogs      AuditLog[]
+  stockMovements StockMovement[]
+  syncEvents     SyncEvent[]
+  syncCursors    SyncCursor[]
+  roles          Role[]
+
+  @@index([name])
+}
+
+// ============================================================
+// USERS / ROLES / PERMISSIONS
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  storeId      String   @db.Uuid
+
+  username     String
+  email        String?
+  passwordHash String
+
+  displayName  String
+  active       Boolean  @default(true)
+
+  roleId       String   @db.Uuid
+
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  createdTransactions   Transaction[]   @relation("TransactionCreatedBy")
+  cancelledTransactions Transaction[]   @relation("TransactionCancelledBy")
+  refunds               Refund[]
+  stockMovements        StockMovement[]
+  auditLogs             AuditLog[]
+  syncEvents            SyncEvent[]
+
+  @@unique([storeId, username])
+  @@index([storeId, active])
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  storeId     String   @db.Uuid
+
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([storeId, name])
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+
+  key         String   @unique
+  description String
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  roleId       String   @db.Uuid
+  permissionId String   @db.Uuid
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// ============================================================
+// CATEGORY
+// ============================================================
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  storeId   String   @db.Uuid
+
+  name      String
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  products  Product[]
+
+  @@unique([storeId, name])
+}
+
+// ============================================================
+// PRODUCT
+// ============================================================
+
+model Product {
+  id                String   @id @default(uuid()) @db.Uuid
+  storeId           String   @db.Uuid
+  categoryId        String   @db.Uuid
+
+  name              String
+  sku               String?
+  barcode           String?
+
+  cost              Decimal  @db.Decimal(18, 2)
+  sellingPrice      Decimal  @db.Decimal(18, 2)
+
+  stock             Decimal  @db.Decimal(18, 3)
+  lowStockThreshold Decimal  @default(0) @db.Decimal(18, 3)
+
+  imageReference    String?
+
+  active            Boolean  @default(true)
+  discontinued      Boolean  @default(false)
+
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  store             Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  category          Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  variants          ProductVariant[]
+  stockMovements    StockMovement[]
+  transactionItems  TransactionItem[]
+  promotionProducts PromotionProduct[]
+
+  @@unique([storeId, name])
+  @@unique([storeId, sku])
+  @@unique([storeId, barcode])
+
+  @@index([storeId, categoryId])
+  @@index([storeId, active])
+}
+
+model ProductVariant {
+  id                String   @id @default(uuid()) @db.Uuid
+  productId         String   @db.Uuid
+
+  name              String
+  sku               String?
+  barcode           String?
+
+  cost              Decimal  @db.Decimal(18, 2)
+  sellingPrice      Decimal  @db.Decimal(18, 2)
+
+  stock             Decimal  @db.Decimal(18, 3)
+  lowStockThreshold Decimal  @default(0) @db.Decimal(18, 3)
+
+  active            Boolean  @default(true)
+
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  stockMovements    StockMovement[]
+  transactionItems  TransactionItem[]
+  promotionProducts PromotionProduct[]
+
+  @@unique([productId, name])
+  @@unique([productId, sku])
+  @@unique([productId, barcode])
+
+  @@index([productId, active])
+}
+
+// ============================================================
+// STOCK MOVEMENT
+// ============================================================
+
+model StockMovement {
+  id            String            @id @default(uuid()) @db.Uuid
+  storeId       String            @db.Uuid
+
+  productId     String            @db.Uuid
+  variantId     String?           @db.Uuid
+
+  type          StockMovementType
+
+  quantityDelta Decimal           @db.Decimal(18, 3)
+  unitCost      Decimal?          @db.Decimal(18, 2)
+
+  referenceType String?
+  referenceId   String?           @db.Uuid
+
+  reason        String?
+
+  createdById   String?           @db.Uuid
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+
+  store         Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  product       Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant       ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  createdBy     User?             @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([productId, createdAt])
+  @@index([variantId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+// ============================================================
+// CUSTOMER
+// ============================================================
+
+model Customer {
+  id        String   @id @default(uuid()) @db.Uuid
+  storeId   String   @db.Uuid
+
+  name      String
+  phone     String?
+  email     String?
+  notes     String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@index([storeId, name])
+  @@index([storeId, phone])
+}
+
+// ============================================================
+// TRANSACTION
+// ============================================================
+
+model Transaction {
+  id                String            @id @default(uuid()) @db.Uuid
+  storeId           String            @db.Uuid
+
+  transactionNumber String
+
+  customerId        String?           @db.Uuid
+
+  status            TransactionStatus @default(DRAFT)
+  orderType         OrderType?
+  queueNumber       String?
+
+  subtotal          Decimal           @db.Decimal(18, 2)
+
+  discountType      DiscountType?
+  discountValue     Decimal?          @db.Decimal(18, 2)
+  discountTotal     Decimal           @db.Decimal(18, 2)
+
+  roundingAmount    Decimal           @default(0) @db.Decimal(18, 2)
+
+  total             Decimal           @db.Decimal(18, 2)
+  paidTotal         Decimal           @default(0) @db.Decimal(18, 2)
+
+  promotionId       String?           @db.Uuid
+
+  createdById       String?           @db.Uuid
+  cancelledById     String?           @db.Uuid
+
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  completedAt       DateTime?         @db.Timestamptz(3)
+  cancelledAt       DateTime?         @db.Timestamptz(3)
+  refundedAt        DateTime?         @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+
+  store             Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  customer          Customer?         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  createdBy         User?             @relation("TransactionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  cancelledBy       User?             @relation("TransactionCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+
+  promotion         Promotion?        @relation(fields: [promotionId], references: [id], onDelete: Restrict)
+
+  items             TransactionItem[]
+  payments          Payment[]
+  refunds           Refund[]
+
+  @@unique([storeId, transactionNumber])
+  @@index([storeId, status, createdAt])
+  @@index([storeId, completedAt])
+}
+
+// ============================================================
+// TRANSACTION ITEM
+// ============================================================
+
+model TransactionItem {
+  id                  String          @id @default(uuid()) @db.Uuid
+  transactionId       String          @db.Uuid
+
+  productId           String          @db.Uuid
+  variantId           String?         @db.Uuid
+
+  productNameSnapshot String
+  variantNameSnapshot String?
+  skuSnapshot         String?
+  barcodeSnapshot     String?
+
+  quantity            Decimal         @db.Decimal(18, 3)
+
+  unitPrice           Decimal         @db.Decimal(18, 2)
+  unitCostSnapshot    Decimal         @db.Decimal(18, 2)
+
+  discountType        DiscountType?
+  discountValue       Decimal?        @db.Decimal(18, 2)
+  discountAmount      Decimal         @default(0) @db.Decimal(18, 2)
+
+  subtotal            Decimal         @db.Decimal(18, 2)
+  total               Decimal         @db.Decimal(18, 2)
+
+  createdAt           DateTime        @default(now()) @db.Timestamptz(3)
+
+  transaction         Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  product             Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant             ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  refundItems         RefundItem[]
+
+  @@index([transactionId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+// ============================================================
+// PAYMENT
+// ============================================================
+
+model Payment {
+  id              String         @id @default(uuid()) @db.Uuid
+  transactionId   String         @db.Uuid
+  paymentMethodId String         @db.Uuid
+
+  amount          Decimal        @db.Decimal(18, 2)
+  roundingAmount  Decimal        @default(0) @db.Decimal(18, 2)
+
+  status          PaymentStatus  @default(PENDING)
+
+  metadata        Json?
+
+  paidAt          DateTime?      @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  transaction     Transaction    @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  paymentMethod   PaymentMethod  @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+}
+
+model PaymentMethod {
+  id            String            @id @default(uuid()) @db.Uuid
+  storeId       String            @db.Uuid
+
+  type          PaymentMethodType
+  name          String
+
+  enabled       Boolean           @default(true)
+
+  configuration Json?
+
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime          @updatedAt @db.Timestamptz(3)
+
+  store         Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  payments      Payment[]
+
+  @@unique([storeId, name])
+  @@index([storeId, enabled])
+}
+
+// ============================================================
+// REFUND
+// ============================================================
+
+model Refund {
+  id            String       @id @default(uuid()) @db.Uuid
+  transactionId String       @db.Uuid
+
+  amount        Decimal      @db.Decimal(18, 2)
+  reason        String
+
+  status        RefundStatus @default(COMPLETED)
+
+  createdById   String       @db.Uuid
+
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+
+  transaction   Transaction  @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  createdBy     User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  items         RefundItem[]
+
+  @@index([transactionId])
+}
+
+model RefundItem {
+  id                String          @id @default(uuid()) @db.Uuid
+  refundId          String          @db.Uuid
+  transactionItemId String          @db.Uuid
+
+  quantity          Decimal         @db.Decimal(18, 3)
+  amount            Decimal         @db.Decimal(18, 2)
+
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+
+  refund            Refund          @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  transactionItem   TransactionItem @relation(fields: [transactionItemId], references: [id], onDelete: Restrict)
+
+  @@index([refundId])
+  @@index([transactionItemId])
+}
+
+// ============================================================
+// PROMOTION
+// ============================================================
+
+model Promotion {
+  id              String               @id @default(uuid()) @db.Uuid
+  storeId         String               @db.Uuid
+
+  name            String
+  description     String?
+
+  type            DiscountType
+  value           Decimal              @db.Decimal(18, 2)
+
+  startAt         DateTime             @db.Timestamptz(3)
+  endAt           DateTime             @db.Timestamptz(3)
+
+  minimumPurchase Decimal?             @db.Decimal(18, 2)
+
+  active          Boolean              @default(true)
+
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+
+  store           Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conditions      PromotionCondition[]
+  products        PromotionProduct[]
+  codes           PromotionCode[]
+  transactions    Transaction[]
+
+  @@unique([storeId, name])
+  @@index([storeId, active, startAt, endAt])
+}
+
+model PromotionCondition {
+  id            String                 @id @default(uuid()) @db.Uuid
+  promotionId   String                 @db.Uuid
+
+  type          PromotionConditionType
+
+  configuration Json
+
+  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
+
+  promotion     Promotion              @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@index([promotionId])
+}
+
+model PromotionProduct {
+  id          String          @id @default(uuid()) @db.Uuid
+
+  promotionId String          @db.Uuid
+  productId   String          @db.Uuid
+  variantId   String?         @db.Uuid
+
+  promotion   Promotion       @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([promotionId, productId, variantId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+model PromotionCode {
+  id          String    @id @default(uuid()) @db.Uuid
+
+  storeId     String    @db.Uuid
+  promotionId String    @db.Uuid
+
+  code        String
+  usageLimit  Int?
+  usageCount  Int       @default(0)
+
+  active      Boolean   @default(true)
+  expiresAt   DateTime? @db.Timestamptz(3)
+
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, code])
+  @@index([promotionId])
+}
+
+// ============================================================
+// PRINTER
+// ============================================================
+
+model Printer {
+  id               String                @id @default(uuid()) @db.Uuid
+  storeId          String                @db.Uuid
+
+  name             String
+  connectionType   PrinterConnectionType
+  addressReference String?
+
+  paperSize        PrinterPaperSize
+  role             PrinterRole
+
+  receiptCopies    Int                   @default(1)
+  kitchenCopies    Int                   @default(1)
+
+  autoPrint        Boolean               @default(false)
+  active           Boolean               @default(true)
+
+  configuration    Json?
+
+  createdAt        DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime              @updatedAt @db.Timestamptz(3)
+
+  store            Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, role, active])
+}
+
+// ============================================================
+// AUDIT
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  storeId    String   @db.Uuid
+  userId     String?  @db.Uuid
+
+  action     String
+  entityType String
+  entityId   String?  @db.Uuid
+
+  beforeData Json?
+  afterData  Json?
+  metadata   Json?
+
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([entityType, entityId])
+}
+
+// ============================================================
+// SYNC
+// ============================================================
+
+model SyncEvent {
+  id            String        @id @default(uuid()) @db.Uuid
+
+  storeId       String        @db.Uuid
+  deviceId      String
+
+  entityType    String
+  entityId      String        @db.Uuid
+
+  operation     SyncOperation
+  payload       Json
+
+  status        SyncStatus    @default(PENDING)
+
+  attemptCount  Int           @default(0)
+  lastAttemptAt DateTime?     @db.Timestamptz(3)
+  syncedAt      DateTime?     @db.Timestamptz(3)
+
+  createdById   String?       @db.Uuid
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+
+  store         Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  createdBy     User?         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId, deviceId, status])
+  @@index([storeId, entityType, entityId])
+}
+
+model SyncCursor {
+  id        String   @id @default(uuid()) @db.Uuid
+
+  storeId   String   @db.Uuid
+  deviceId  String
+
+  cursor    BigInt   @default(0)
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, deviceId])
+}
