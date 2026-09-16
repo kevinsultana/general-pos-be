@@ -10,7 +10,7 @@ export const createPrinterSchema = z.object({
   kitchenCopies: z.number().int().min(1).max(5).default(1),
   autoPrint: z.boolean().default(false),
   active: z.boolean().default(true),
-  configuration: z.any().optional(),
+  configuration: z.union([z.record(z.any()), z.string(), z.null()]).optional(),
 });
 
 export const updatePrinterSchema = z.object({
@@ -23,7 +23,7 @@ export const updatePrinterSchema = z.object({
   kitchenCopies: z.number().int().min(1).max(5).optional(),
   autoPrint: z.boolean().optional(),
   active: z.boolean().optional(),
-  configuration: z.any().optional(),
+  configuration: z.union([z.record(z.any()), z.string(), z.null()]).optional(),
 });
 
 export type CreatePrinterInput = z.infer<typeof createPrinterSchema>;

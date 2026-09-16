@@ -201,4 +201,22 @@ export class PromotionsService {
       discountAmount,
     };
   }
+
+  static async deletePromotion(storeId: string, promotionId: string) {
+    const existing = await prisma.promotion.findFirst({
+      where: { id: promotionId, storeId },
+    });
+
+    if (!existing) {
+      throw { statusCode: 404, code: 'NOT_FOUND', message: 'Promosi tidak ditemukan' };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.promotionCode.deleteMany({ where: { promotionId } });
+      await tx.promotionCondition.deleteMany({ where: { promotionId } });
+      await tx.promotion.delete({ where: { id: promotionId } });
+    });
+
+    return true;
+  }
 }

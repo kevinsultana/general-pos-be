@@ -2,6 +2,14 @@ import { prisma } from '../../config/prisma.js';
 import { logger } from '../../utils/logger.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
+import { ProductsService } from '../products/products.service.js';
+import { createProductSchema, updateProductSchema } from '../products/products.schemas.js';
+import { CustomersService } from '../customers/customers.service.js';
+import { createCustomerSchema, updateCustomerSchema } from '../customers/customers.schemas.js';
+import { PromotionsService } from '../promotions/promotions.service.js';
+import { createPromotionSchema, updatePromotionSchema } from '../promotions/promotions.schemas.js';
+import { PrintersService } from '../printers/printers.service.js';
+import { createPrinterSchema, updatePrinterSchema } from '../printers/printers.schemas.js';
 import { SyncEventInput, validateEventPayload } from './sync.schemas.js';
 import { AuditService } from '../audit/audit.service.js';
 
@@ -9,7 +17,7 @@ export interface SyncEventResult {
   eventId: string;
   operation: string;
   entityId: string;
-  status: 'SYNCED' | 'FAILED' | 'SKIPPED';
+  status: 'SYNCED' | 'FAILED' | 'SKIPPED' | 'CONFLICT';
   error?: string;
 }
 
@@ -78,26 +86,47 @@ export class SyncService {
     deviceId: string,
     event: SyncEventInput
   ): Promise<SyncEventResult> {
-    // 1. Idempotency: check if this eventId was already processed
+    // 1. Idempotency: check if this eventId was already processed or is in-flight
     const existing = await prisma.syncEvent.findFirst({
-      where: {
-        id: event.eventId,
-        status: 'SYNCED',
-      },
+      where: { id: event.eventId },
+      select: { id: true, status: true },
     });
 
     if (existing) {
-      return {
-        eventId: event.eventId,
-        operation: event.operation,
-        entityId: event.entityId,
-        status: 'SKIPPED',
-      };
+      if (existing.status === 'SYNCED') {
+        // Already successfully processed — skip silently
+        return {
+          eventId: event.eventId,
+          operation: event.operation,
+          entityId: event.entityId,
+          status: 'SKIPPED',
+        };
+      }
+      if (existing.status === 'PROCESSING') {
+        // Currently in-flight on another request — report as SKIPPED (client will retry if it never resolves)
+        return {
+          eventId: event.eventId,
+          operation: event.operation,
+          entityId: event.entityId,
+          status: 'SKIPPED',
+        };
+      }
+      // FAILED or CONFLICT: delete the old record so we can retry cleanly below
+      await prisma.syncEvent.delete({ where: { id: existing.id } });
     }
 
-    // 2. Create a PENDING record in SyncEvent log
+    // 2. Create a PENDING record, then immediately mark PROCESSING
     let syncRecord: { id: string } | null = null;
     try {
+      const syncOp: 'CREATE' | 'UPDATE' | 'DELETE' | 'EVENT' =
+        event.operation === 'CREATE' || event.operation.startsWith('CREATE_')
+          ? 'CREATE'
+          : event.operation === 'UPDATE' || event.operation.startsWith('UPDATE_')
+          ? 'UPDATE'
+          : event.operation === 'DELETE' || event.operation.startsWith('DELETE_')
+          ? 'DELETE'
+          : 'EVENT';
+
       syncRecord = await prisma.syncEvent.create({
         data: {
           id: event.eventId,
@@ -105,12 +134,14 @@ export class SyncService {
           deviceId,
           entityType: SyncService.getEntityType(event.operation),
           entityId: event.entityId,
-          operation: 'EVENT',
+          operation: syncOp,
           payload: {
             operation: event.operation,
             data: event.payload,
           } as any,
-          status: 'PENDING',
+          status: 'PROCESSING',
+          attemptCount: 1,
+          lastAttemptAt: new Date(),
           createdById: currentUserId,
         },
         select: { id: true },
@@ -147,6 +178,92 @@ export class SyncService {
           break;
         }
 
+        case 'CREATE_PRODUCT': {
+          const parsed = createProductSchema.parse(validatedPayload);
+          await ProductsService.createProduct(storeId, parsed, currentUserId);
+          break;
+        }
+
+        case 'UPDATE_PRODUCT': {
+          const parsed = updateProductSchema.parse(validatedPayload);
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await ProductsService.updateProduct(storeId, entityId, parsed, currentUserId);
+          break;
+        }
+
+        case 'DELETE_PRODUCT': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await ProductsService.deleteProduct(storeId, entityId, currentUserId);
+          break;
+        }
+
+        case 'CREATE_CUSTOMER': {
+          const parsed = createCustomerSchema.parse(validatedPayload);
+          await CustomersService.createCustomer(storeId, parsed);
+          break;
+        }
+
+        case 'UPDATE_CUSTOMER': {
+          const parsed = updateCustomerSchema.parse(validatedPayload);
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await CustomersService.updateCustomer(storeId, entityId, parsed);
+          break;
+        }
+
+        case 'DELETE_CUSTOMER': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await CustomersService.deleteCustomer(storeId, entityId);
+          break;
+        }
+
+        case 'CREATE_PROMOTION': {
+          const parsed = createPromotionSchema.parse(validatedPayload);
+          await PromotionsService.createPromotion(storeId, parsed);
+          break;
+        }
+
+        case 'UPDATE_PROMOTION': {
+          const parsed = updatePromotionSchema.parse(validatedPayload);
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await PromotionsService.updatePromotion(storeId, entityId, parsed);
+          break;
+        }
+
+        case 'DELETE_PROMOTION': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await PromotionsService.deletePromotion(storeId, entityId);
+          break;
+        }
+
+        case 'CREATE_PRINTER': {
+          const parsed = createPrinterSchema.parse(validatedPayload);
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await PrintersService.upsertPrinter(storeId, { ...parsed, id: entityId });
+          break;
+        }
+
+        case 'UPDATE_PRINTER': {
+          const parsed = updatePrinterSchema.parse(validatedPayload);
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await PrintersService.updatePrinter(storeId, entityId, parsed);
+          break;
+        }
+
+        case 'DELETE_PRINTER': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await PrintersService.deletePrinter(storeId, entityId);
+          break;
+        }
+
+        case 'REFUND_TRANSACTION':
+        case 'CREATE':
+        case 'UPDATE':
+        case 'DELETE':
+        case 'EVENT': {
+          // Generic or broadcast sync events
+          break;
+        }
+
         default:
           throw { statusCode: 400, code: 'UNKNOWN_OPERATION', message: `Unknown operation: ${event.operation}` };
       }
@@ -176,14 +293,15 @@ export class SyncService {
       };
     } catch (err: any) {
       const errorMsg = err?.message || JSON.stringify(err);
-      logger.error(`[Sync] Event ${event.eventId} (${event.operation}) failed: ${errorMsg}`);
+      const isConflict = err?.code === 'CONFLICT' || err?.statusCode === 409;
+      logger.error(`[Sync] Event ${event.eventId} (${event.operation}) ${isConflict ? 'CONFLICT' : 'FAILED'}: ${errorMsg}`);
 
-      // Mark as FAILED
+      // Mark as CONFLICT or FAILED depending on error type
       if (syncRecord) {
         await prisma.syncEvent.update({
           where: { id: syncRecord.id },
           data: {
-            status: 'FAILED',
+            status: isConflict ? 'CONFLICT' : 'FAILED',
             attemptCount: { increment: 1 },
             lastAttemptAt: new Date(),
           },
@@ -194,7 +312,7 @@ export class SyncService {
         eventId: event.eventId,
         operation: event.operation,
         entityId: event.entityId,
-        status: 'FAILED',
+        status: isConflict ? 'CONFLICT' : 'FAILED',
         error: errorMsg,
       };
     }
@@ -265,15 +383,53 @@ export class SyncService {
     };
   }
 
+  static async getSyncStatus(storeId: string) {
+    const [totalEvents, cursors, recentEvents] = await Promise.all([
+      prisma.syncEvent.count({ where: { storeId } }),
+      prisma.syncCursor.findMany({
+        where: { storeId },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.syncEvent.findMany({
+        where: { storeId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          deviceId: true,
+          entityType: true,
+          entityId: true,
+          operation: true,
+          status: true,
+          createdAt: true,
+          syncedAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      totalEvents,
+      deviceCount: cursors.length,
+      devices: cursors.map((c) => ({
+        deviceId: c.deviceId,
+        cursor: c.cursor.toString(),
+        updatedAt: c.updatedAt,
+      })),
+      recentEvents: recentEvents.map((e) => ({
+        ...e,
+        createdAt: e.createdAt.toISOString(),
+        syncedAt: e.syncedAt?.toISOString() || null,
+      })),
+    };
+  }
+
   private static getEntityType(operation: string): string {
-    switch (operation) {
-      case 'COMPLETE_TRANSACTION':
-      case 'CANCEL_TRANSACTION':
-        return 'Transaction';
-      case 'ADJUST_STOCK':
-        return 'StockMovement';
-      default:
-        return 'Unknown';
-    }
+    if (operation.includes('TRANSACTION')) return 'Transaction';
+    if (operation.includes('STOCK')) return 'StockMovement';
+    if (operation.includes('PRODUCT')) return 'Product';
+    if (operation.includes('CUSTOMER')) return 'Customer';
+    if (operation.includes('PROMOTION')) return 'Promotion';
+    if (operation.includes('PRINTER')) return 'Printer';
+    return 'Unknown';
   }
 }

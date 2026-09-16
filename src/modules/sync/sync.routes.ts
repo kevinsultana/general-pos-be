@@ -11,6 +11,7 @@ router.use(requirePlan('PAID'));
 
 router.post('/push', requirePermission('sync_data'), SyncController.push);
 router.get('/pull', requirePermission('sync_data'), SyncController.pull);
+router.get('/status', requirePermission('sync_data'), SyncController.getStatus);
 
 export default router;
 

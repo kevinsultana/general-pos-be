@@ -18,6 +18,7 @@ router.get('/:id', requirePermission('view_promotions'), PromotionsController.ge
 router.post('/', requirePermission('manage_promotions'), validateBody(createPromotionSchema), PromotionsController.createPromotion);
 router.patch('/:id', requirePermission('manage_promotions'), validateBody(updatePromotionSchema), PromotionsController.updatePromotion);
 router.put('/:id', requirePermission('manage_promotions'), validateBody(updatePromotionSchema), PromotionsController.updatePromotion);
+router.delete('/:id', requirePermission('manage_promotions'), PromotionsController.deletePromotion);
 router.post('/validate', requirePermission('create_transaction'), validateBody(validatePromoCodeSchema), PromotionsController.validatePromoCode);
 
 export default router;

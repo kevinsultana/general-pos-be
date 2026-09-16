@@ -25,7 +25,7 @@ export const completeTransactionSchema = z.object({
   id: z.string().uuid().optional(), // Client-generated UUID for idempotency
   transactionNumber: z.string().optional(),
   customerId: z.string().uuid().optional().nullable(),
-  orderType: z.enum(['DINE_IN', 'TAKEAWAY']).optional().nullable(),
+  orderType: z.enum(['DINE_IN', 'TAKEAWAY', 'DELIVERY', 'ONLINE']).optional().nullable(),
   queueNumber: z.string().optional().nullable(),
   items: z.array(transactionItemInputSchema).min(1, 'Transaksi minimal harus memiliki 1 item'),
   payments: z.array(transactionPaymentInputSchema).min(1, 'Transaksi minimal harus memiliki 1 pembayaran'),

@@ -10,6 +10,7 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
   let storeId: string;
   let productId: string;
   let paymentMethodId: string;
+  let catId: string;
   const initialStock = 50;
 
   beforeAll(async () => {
@@ -34,7 +35,7 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
     const catRes = await request(app)
       .get('/api/v1/categories')
       .set('Authorization', `Bearer ${token}`);
-    const catId = catRes.body.data[0].id;
+    catId = catRes.body.data[0].id;
 
     // 5. Create fresh product for testing
     const prodRes = await request(app)
@@ -311,4 +312,391 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
       .set('Authorization', `Bearer ${token}`);
     expect(trxRes.body.data.status).toBe('CANCELLED');
   });
+
+  // ──────────────── 6. Sync Push: Product CRUD ────────────────
+
+  it('Sync Push: CREATE_PRODUCT, UPDATE_PRODUCT, and DELETE_PRODUCT', async () => {
+    const deviceId = `pos-device-${Date.now()}`;
+    const newProdId = uuidv4();
+
+    // 1. CREATE_PRODUCT
+    const createProdEventId = uuidv4();
+    const createProdRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: createProdEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'CREATE_PRODUCT',
+            entityId: newProdId,
+            payload: {
+              categoryId: catId,
+              name: `Sync Product ${Date.now()}`,
+              cost: 5000,
+              sellingPrice: 8000,
+              stock: 20,
+              lowStockThreshold: 2,
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(createProdRes.status).toBe(200);
+    expect(createProdRes.body.data.synced).toBe(1);
+
+    // Find created product in DB
+    const dbProd = await prisma.product.findFirst({
+      where: { storeId, name: { startsWith: 'Sync Product' } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(dbProd).toBeDefined();
+    expect(Number(dbProd?.sellingPrice)).toBe(8000);
+    const createdProdId = dbProd!.id;
+
+    // 2. UPDATE_PRODUCT
+    const updateProdEventId = uuidv4();
+    const updateProdRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: updateProdEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'UPDATE_PRODUCT',
+            entityId: createdProdId,
+            payload: {
+              sellingPrice: 9500,
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(updateProdRes.status).toBe(200);
+    expect(updateProdRes.body.data.synced).toBe(1);
+
+    const updatedProd = await prisma.product.findUnique({ where: { id: createdProdId } });
+    expect(Number(updatedProd?.sellingPrice)).toBe(9500);
+
+    // 3. DELETE_PRODUCT
+    const deleteProdEventId = uuidv4();
+    const deleteProdRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: deleteProdEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'DELETE_PRODUCT',
+            entityId: createdProdId,
+            payload: { id: createdProdId },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(deleteProdRes.status).toBe(200);
+    expect(deleteProdRes.body.data.synced).toBe(1);
+
+    const deletedProd = await prisma.product.findUnique({ where: { id: createdProdId } });
+    expect(deletedProd === null || deletedProd.active === false).toBe(true);
+  });
+
+  // ──────────────── 7. Sync Push: Customer CRUD ────────────────
+
+  it('Sync Push: CREATE_CUSTOMER, UPDATE_CUSTOMER, and DELETE_CUSTOMER', async () => {
+    const deviceId = `pos-device-${Date.now()}`;
+    const custEventId = uuidv4();
+    const custName = `Customer ${Date.now()}`;
+
+    // 1. CREATE_CUSTOMER
+    const createCustRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: custEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'CREATE_CUSTOMER',
+            entityId: uuidv4(),
+            payload: {
+              name: custName,
+              phone: '08123456789',
+              notes: 'Sync VIP',
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(createCustRes.status).toBe(200);
+    expect(createCustRes.body.data.synced).toBe(1);
+
+    const dbCust = await prisma.customer.findFirst({
+      where: { storeId, name: custName },
+    });
+    expect(dbCust).toBeDefined();
+    expect(dbCust?.phone).toBe('08123456789');
+    const custId = dbCust!.id;
+
+    // 2. UPDATE_CUSTOMER
+    const updateCustEventId = uuidv4();
+    const updateCustRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: updateCustEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'UPDATE_CUSTOMER',
+            entityId: custId,
+            payload: {
+              notes: 'Sync VIP Platinum',
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(updateCustRes.status).toBe(200);
+    expect(updateCustRes.body.data.synced).toBe(1);
+
+    const updatedCust = await prisma.customer.findUnique({ where: { id: custId } });
+    expect(updatedCust?.notes).toBe('Sync VIP Platinum');
+
+    // 3. DELETE_CUSTOMER
+    const deleteCustEventId = uuidv4();
+    const deleteCustRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: deleteCustEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'DELETE_CUSTOMER',
+            entityId: custId,
+            payload: { id: custId },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(deleteCustRes.status).toBe(200);
+    expect(deleteCustRes.body.data.synced).toBe(1);
+
+    const deletedCust = await prisma.customer.findUnique({ where: { id: custId } });
+    expect(deletedCust).toBeNull();
+  });
+
+  // ──────────────── 8. Sync Push: Promotion CRUD ────────────────
+
+  it('Sync Push: CREATE_PROMOTION, UPDATE_PROMOTION, and DELETE_PROMOTION', async () => {
+    const deviceId = `pos-device-${Date.now()}`;
+    const promoEventId = uuidv4();
+    const promoName = `Promo Sync ${Date.now()}`;
+
+    // 1. CREATE_PROMOTION
+    const createPromoRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: promoEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'CREATE_PROMOTION',
+            entityId: uuidv4(),
+            payload: {
+              name: promoName,
+              type: 'PERCENTAGE',
+              value: 15,
+              startAt: new Date().toISOString(),
+              endAt: new Date(Date.now() + 86400000 * 7).toISOString(),
+              minimumPurchase: 50000,
+              code: `SYNC${Date.now()}`.slice(0, 15),
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(createPromoRes.status).toBe(200);
+    expect(createPromoRes.body.data.synced).toBe(1);
+
+    const dbPromo = await prisma.promotion.findFirst({
+      where: { storeId, name: promoName },
+      include: { codes: true },
+    });
+    expect(dbPromo).toBeDefined();
+    expect(Number(dbPromo?.value)).toBe(15);
+    const promoId = dbPromo!.id;
+
+    // 2. UPDATE_PROMOTION
+    const updatePromoEventId = uuidv4();
+    const updatePromoRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: updatePromoEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'UPDATE_PROMOTION',
+            entityId: promoId,
+            payload: {
+              value: 20,
+            },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(updatePromoRes.status).toBe(200);
+    expect(updatePromoRes.body.data.synced).toBe(1);
+
+    const updatedPromo = await prisma.promotion.findUnique({ where: { id: promoId } });
+    expect(Number(updatedPromo?.value)).toBe(20);
+
+    // 3. DELETE_PROMOTION
+    const deletePromoEventId = uuidv4();
+    const deletePromoRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: deletePromoEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'DELETE_PROMOTION',
+            entityId: promoId,
+            payload: { id: promoId },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(deletePromoRes.status).toBe(200);
+    expect(deletePromoRes.body.data.synced).toBe(1);
+
+    const deletedPromo = await prisma.promotion.findUnique({ where: { id: promoId } });
+    expect(deletedPromo).toBeNull();
+  });
+
+  // ──────────────── P3.2: Conflict & Error Handling Lifecycle ────────────────
+
+  it('P3.2: Failed or conflicting events are recorded with proper status and can be retried', async () => {
+    const deviceId = `pos-device-${Date.now()}`;
+    const failedEventId = uuidv4();
+    const nonExistentPromoId = uuidv4();
+
+    // 1. Push an event that triggers an error (updating nonexistent promotion)
+    const pushRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: failedEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'UPDATE_PROMOTION',
+            entityId: nonExistentPromoId,
+            payload: { value: 25 },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(pushRes.status).toBe(200);
+    expect(pushRes.body.data.failed).toBe(1);
+    expect(pushRes.body.data.results[0].status).toBe('FAILED');
+
+    // Verify record in database is marked FAILED
+    const failedRecord = await prisma.syncEvent.findUnique({ where: { id: failedEventId } });
+    expect(failedRecord).toBeDefined();
+    expect(failedRecord?.status).toBe('FAILED');
+
+    // 2. Client retries the event with the same eventId after correcting payload
+    // First create the actual promo so update succeeds
+    const createPromoRes = await request(app)
+      .post('/api/v1/promotions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: `Retry Promo ${Date.now()}`,
+        type: 'PERCENTAGE',
+        value: 10,
+      });
+    const validPromoId = createPromoRes.body.data.id;
+
+    // Push retry with same eventId but targeting the valid promo
+    const retryRes = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', deviceId)
+      .send({
+        events: [
+          {
+            eventId: failedEventId,
+            deviceId,
+            occurredAt: new Date().toISOString(),
+            operation: 'UPDATE_PROMOTION',
+            entityId: validPromoId,
+            payload: { value: 30 },
+            clientVersion: '1.0.0',
+          },
+        ],
+      });
+
+    expect(retryRes.status).toBe(200);
+    expect(retryRes.body.data.synced).toBe(1);
+    expect(retryRes.body.data.results[0].status).toBe('SYNCED');
+
+    // Verify record in database is now updated to SYNCED
+    const retriedRecord = await prisma.syncEvent.findUnique({ where: { id: failedEventId } });
+    expect(retriedRecord?.status).toBe('SYNCED');
+  });
+
+  it('P3.5: GET /sync/status returns device count, event statistics, and recent sync history', async () => {
+    const res = await request(app)
+      .get('/api/v1/sync/status')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveProperty('totalEvents');
+    expect(res.body.data).toHaveProperty('deviceCount');
+    expect(res.body.data).toHaveProperty('devices');
+    expect(res.body.data).toHaveProperty('recentEvents');
+    expect(Array.isArray(res.body.data.devices)).toBe(true);
+    expect(Array.isArray(res.body.data.recentEvents)).toBe(true);
+    expect(res.body.data.totalEvents).toBeGreaterThanOrEqual(1);
+  });
 });
+

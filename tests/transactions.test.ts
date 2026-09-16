@@ -303,4 +303,66 @@ describe('Transactions & Financial Integrity Tests', () => {
     expect(Number(res.body.data.roundingAmount)).toBe(200);
     expect(Number(res.body.data.total)).toBe(10000);
   });
+
+  it('P4.2: Completes transactions with DELIVERY and ONLINE order types successfully', async () => {
+    // 1. Test DELIVERY orderType
+    const deliveryRes = await request(app)
+      .post('/api/v1/transactions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        id: uuidv4(),
+        orderType: 'DELIVERY',
+        subtotal: 10000,
+        total: 10000,
+        items: [
+          {
+            productId,
+            quantity: 1,
+            unitPrice: 10000,
+            subtotal: 10000,
+            total: 10000,
+          },
+        ],
+        payments: [
+          {
+            paymentMethodId,
+            amount: 10000,
+          },
+        ],
+      });
+
+    expect(deliveryRes.status).toBe(201);
+    expect(deliveryRes.body.success).toBe(true);
+    expect(deliveryRes.body.data.orderType).toBe('DELIVERY');
+
+    // 2. Test ONLINE orderType
+    const onlineRes = await request(app)
+      .post('/api/v1/transactions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        id: uuidv4(),
+        orderType: 'ONLINE',
+        subtotal: 10000,
+        total: 10000,
+        items: [
+          {
+            productId,
+            quantity: 1,
+            unitPrice: 10000,
+            subtotal: 10000,
+            total: 10000,
+          },
+        ],
+        payments: [
+          {
+            paymentMethodId,
+            amount: 10000,
+          },
+        ],
+      });
+
+    expect(onlineRes.status).toBe(201);
+    expect(onlineRes.body.success).toBe(true);
+    expect(onlineRes.body.data.orderType).toBe('ONLINE');
+  });
 });

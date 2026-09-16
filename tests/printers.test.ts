@@ -87,4 +87,56 @@ describe('Printers & Role/PaperSize Enum Tests', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.role).toBe('KITCHEN');
   });
+
+  it('P4.3: POST /api/v1/printers supports JSON object configuration', async () => {
+    const res = await request(app)
+      .post('/api/v1/printers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: `Printer Network Object ${Date.now()}`,
+        connectionType: 'NETWORK',
+        addressReference: '192.168.1.88',
+        role: 'RECEIPT',
+        paperSize: 'PAPER_80MM',
+        configuration: {
+          charsPerLine: 48,
+          baudRate: 115200,
+          cutPaper: true,
+          ip: '192.168.1.88',
+        },
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.configuration).toEqual({
+      charsPerLine: 48,
+      baudRate: 115200,
+      cutPaper: true,
+      ip: '192.168.1.88',
+    });
+  });
+
+  it('P4.3: POST /api/v1/printers normalizes stringified JSON configuration to JSON object', async () => {
+    const res = await request(app)
+      .post('/api/v1/printers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: `Printer Stringified Config ${Date.now()}`,
+        connectionType: 'BLUETOOTH',
+        addressReference: '11:22:33:44:55:66',
+        role: 'BOTH',
+        paperSize: 'PAPER_58MM',
+        configuration: JSON.stringify({
+          charsPerLine: 32,
+          drawerPin: 2,
+        }),
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.configuration).toEqual({
+      charsPerLine: 32,
+      drawerPin: 2,
+    });
+  });
 });

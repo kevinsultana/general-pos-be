@@ -44,4 +44,14 @@ export class SyncController {
       next(err);
     }
   }
+
+  static async getStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const storeId = req.user!.storeId;
+      const status = await SyncService.getSyncStatus(storeId);
+      return sendSuccess(res, status, 'Status sinkronisasi berhasil diambil');
+    } catch (err) {
+      next(err);
+    }
+  }
 }

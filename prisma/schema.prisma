@@ -27,6 +27,8 @@ enum TransactionStatus {
 enum OrderType {
   DINE_IN
   TAKEAWAY
+  DELIVERY
+  ONLINE
 }
 
 enum DiscountType {

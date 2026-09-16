@@ -46,6 +46,17 @@ export class PromotionsController {
     }
   }
 
+  static async deletePromotion(req: Request, res: Response, next: NextFunction) {
+    try {
+      const storeId = req.user!.storeId;
+      const promotionId = req.params.id as string;
+      await PromotionsService.deletePromotion(storeId, promotionId);
+      return sendSuccess(res, null, 'Promosi berhasil dihapus');
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async validatePromoCode(req: Request, res: Response, next: NextFunction) {
     try {
       const storeId = req.user!.storeId;
