@@ -698,5 +698,139 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
     expect(Array.isArray(res.body.data.recentEvents)).toBe(true);
     expect(res.body.data.totalEvents).toBeGreaterThanOrEqual(1);
   });
+
+  it('Phase 1 Blocker Test: Mobile push with paymentMethodId pm-cash and local ISO timestamp without Z succeeds', async () => {
+    const mobileEventId = uuidv4();
+    const mobileTrxId = uuidv4();
+
+    const pushPayload = {
+      events: [
+        {
+          eventId: mobileEventId,
+          deviceId: 'mobile-tablet-pos-01',
+          occurredAt: '2026-09-16T18:30:00.123456', // No 'Z' suffix (local Dart DateTime format)
+          operation: 'COMPLETE_TRANSACTION',
+          entityId: mobileTrxId,
+          payload: {
+            id: mobileTrxId,
+            subtotal: 15000,
+            discountTotal: 0,
+            roundingAmount: 0,
+            total: 15000,
+            items: [
+              {
+                productId,
+                quantity: 1,
+                unitPrice: 15000,
+                discountAmount: 0,
+                subtotal: 15000,
+                total: 15000,
+              },
+            ],
+            payments: [
+              {
+                paymentMethodId: 'pm-cash', // Mobile client alias!
+                amount: 15000,
+                roundingAmount: 0,
+                paymentType: 'CASH',
+              },
+            ],
+          },
+          clientVersion: '1.0.0',
+        },
+      ],
+    };
+
+    const res = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', 'mobile-tablet-pos-01')
+      .send(pushPayload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.synced).toBe(1);
+    expect(res.body.data.results[0].status).toBe('SYNCED');
+
+    // Verify transaction exists in database and paymentMethodId was resolved to a valid store PaymentMethod UUID
+    const trx = await prisma.transaction.findUnique({
+      where: { id: mobileTrxId },
+      include: { payments: { include: { paymentMethod: true } } },
+    });
+    expect(trx).not.toBeNull();
+    expect(trx?.payments.length).toBe(1);
+    expect(trx?.payments[0].paymentMethod.type).toBe('CASH');
+  });
+
+  it('Phase 3 Resilience Test: Offline COMPLETE_TRANSACTION sync succeeds even when cloud stock is 0 (negative stock allowed)', async () => {
+    // 1. Create a product with 0 stock
+    const zeroStockProd = await prisma.product.create({
+      data: {
+        storeId,
+        categoryId: catId,
+        name: `Zero Stock Item ${Date.now()}`,
+        cost: 10000,
+        sellingPrice: 15000,
+        stock: 0,
+      },
+    });
+
+    const mobileTrxId = uuidv4();
+    const eventId = uuidv4();
+    const pushPayload = {
+      events: [
+        {
+          eventId,
+          deviceId: 'mobile-offline-tablet',
+          occurredAt: new Date().toISOString(),
+          operation: 'COMPLETE_TRANSACTION',
+          entityId: mobileTrxId,
+          payload: {
+            id: mobileTrxId,
+            transactionNumber: `TRX-OFFLINE-${Date.now()}`,
+            subtotal: 30000,
+            discountTotal: 0,
+            roundingAmount: 0,
+            total: 30000,
+            items: [
+              {
+                productId: zeroStockProd.id,
+                quantity: 2,
+                unitPrice: 15000,
+                discountAmount: 0,
+                subtotal: 30000,
+                total: 30000,
+              },
+            ],
+            payments: [
+              {
+                paymentMethodId: 'pm-cash',
+                amount: 30000,
+                roundingAmount: 0,
+                paymentType: 'CASH',
+              },
+            ],
+          },
+          clientVersion: '1.0.0',
+        },
+      ],
+    };
+
+    const res = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Device-Id', 'mobile-offline-tablet')
+      .send(pushPayload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.synced).toBe(1);
+    expect(res.body.data.results[0].status).toBe('SYNCED');
+
+    // Verify stock is decremented to -2 and transaction was recorded
+    const updatedProd = await prisma.product.findUnique({
+      where: { id: zeroStockProd.id },
+      select: { stock: true },
+    });
+    expect(Number(updatedProd?.stock)).toBe(-2);
+  });
 });
 

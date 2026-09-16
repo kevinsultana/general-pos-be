@@ -94,7 +94,8 @@ export class TransactionsService {
   static async completeTransaction(
     storeId: string,
     input: CompleteTransactionInput,
-    currentUserId: string
+    currentUserId: string,
+    options?: { allowNegativeStock?: boolean; allowInactiveProducts?: boolean }
   ) {
     const transactionId = input.id || uuidv4();
 
@@ -120,7 +121,7 @@ export class TransactionsService {
 
     for (const item of input.items) {
       const product = productMap.get(item.productId);
-      if (!product || !product.active) {
+      if (!product || (!product.active && !options?.allowInactiveProducts)) {
         throw {
           statusCode: 400,
           code: 'PRODUCT_INACTIVE_OR_NOT_FOUND',
@@ -129,15 +130,69 @@ export class TransactionsService {
       }
     }
 
-    // 3. Validate Cash Rounding rules (PRD Bab 21 & INV-013)
-    const paymentMethodIds = input.payments.map((p) => p.paymentMethodId);
-    const paymentMethods = await prisma.paymentMethod.findMany({
-      where: { id: { in: paymentMethodIds }, storeId },
-    });
-    const pmMap = new Map(paymentMethods.map((pm) => [pm.id, pm]));
+    // 3. Validate Cash Rounding rules (PRD Bab 21 & INV-013) and resolve payment methods
+    const isUuid = (str: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 
+    const resolveAliasType = (methodIdOrType: string): 'CASH' | 'QRIS' | 'TRANSFER' | 'DEBIT' | 'CREDIT' => {
+      const lower = (methodIdOrType || '').toLowerCase();
+      if (lower.includes('cash') || lower.includes('tunai')) return 'CASH';
+      if (lower.includes('qris')) return 'QRIS';
+      if (lower.includes('transfer') || lower.includes('trf')) return 'TRANSFER';
+      if (lower.includes('credit')) return 'CREDIT';
+      if (lower.includes('debit') || lower.includes('card')) return 'DEBIT';
+      return 'CASH';
+    };
+
+    const validUuidIds = input.payments
+      .map((p) => p.paymentMethodId)
+      .filter((id) => isUuid(id));
+
+    const existingPaymentMethods = await prisma.paymentMethod.findMany({
+      where: { id: { in: validUuidIds }, storeId },
+    });
+    const pmMap = new Map<string, any>(existingPaymentMethods.map((pm) => [pm.id, pm]));
+
+    // Resolve aliases or unknown IDs to real store PaymentMethod rows
     for (const p of input.payments) {
-      const pm = pmMap.get(p.paymentMethodId);
+      let pm = pmMap.get(p.paymentMethodId);
+      if (!pm) {
+        const targetType = resolveAliasType(
+          (p.metadata as any)?.paymentType || p.paymentMethodId || 'CASH'
+        );
+        pm = await prisma.paymentMethod.findFirst({
+          where: { storeId, type: targetType, enabled: true },
+        });
+        if (!pm) {
+          pm = await prisma.paymentMethod.findFirst({
+            where: { storeId, type: targetType },
+          });
+        }
+        if (!pm) {
+          const defaultName =
+            targetType === 'CASH'
+              ? 'Tunai'
+              : targetType === 'QRIS'
+              ? 'QRIS'
+              : targetType === 'TRANSFER'
+              ? 'Transfer Bank'
+              : targetType === 'CREDIT'
+              ? 'Kartu Kredit'
+              : 'Kartu Debit';
+          pm = await prisma.paymentMethod.create({
+            data: {
+              storeId,
+              name: defaultName,
+              type: targetType,
+              enabled: true,
+            },
+          });
+        }
+        pmMap.set(p.paymentMethodId, pm);
+        pmMap.set(pm.id, pm);
+        p.paymentMethodId = pm.id;
+      }
+
       const paymentType = pm?.type || (p.metadata as any)?.paymentType;
       if (paymentType && paymentType !== 'CASH' && p.roundingAmount && p.roundingAmount !== 0) {
         throw {
@@ -161,8 +216,17 @@ export class TransactionsService {
     const now = new Date();
     const datePrefix = now.toISOString().slice(0, 10).replace(/-/g, '');
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const transactionNumber =
+    let transactionNumber =
       input.transactionNumber || `TRX-${datePrefix}-${Date.now().toString().slice(-6)}-${randomSuffix}`;
+
+    // Safety guard against unique constraint collision with another transaction ID
+    const conflictingTrx = await prisma.transaction.findFirst({
+      where: { storeId, transactionNumber, NOT: { id: transactionId } },
+      select: { id: true },
+    });
+    if (conflictingTrx) {
+      transactionNumber = `${transactionNumber}-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
 
     // 4. Execute Atomic DB Transaction
     const result = await prisma.$transaction(async (tx) => {
@@ -233,7 +297,7 @@ export class TransactionsService {
             where: { id: item.variantId },
             select: { stock: true },
           });
-          if (!currentVariant || Number(currentVariant.stock) < item.quantity) {
+          if (!options?.allowNegativeStock && (!currentVariant || Number(currentVariant.stock) < item.quantity)) {
             throw {
               statusCode: 409,
               code: 'INSUFFICIENT_STOCK',
@@ -249,7 +313,7 @@ export class TransactionsService {
             where: { id: item.productId },
             select: { stock: true },
           });
-          if (!currentProd || Number(currentProd.stock) < item.quantity) {
+          if (!options?.allowNegativeStock && (!currentProd || Number(currentProd.stock) < item.quantity)) {
             throw {
               statusCode: 409,
               code: 'INSUFFICIENT_STOCK',

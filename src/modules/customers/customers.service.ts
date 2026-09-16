@@ -46,14 +46,34 @@ export class CustomersService {
     return customer;
   }
 
-  static async createCustomer(storeId: string, input: CreateCustomerInput) {
+  static async createCustomer(storeId: string, input: CreateCustomerInput & { id?: string }) {
+    if (input.id) {
+      return prisma.customer.upsert({
+        where: { id: input.id },
+        create: {
+          id: input.id,
+          storeId,
+          name: input.name,
+          phone: input.phone || null,
+          email: input.email || null,
+          notes: input.notes || null,
+        },
+        update: {
+          name: input.name,
+          phone: input.phone || null,
+          email: input.email || null,
+          notes: input.notes || null,
+        },
+      });
+    }
+
     return prisma.customer.create({
       data: {
         storeId,
         name: input.name,
-        phone: input.phone,
-        email: input.email,
-        notes: input.notes,
+        phone: input.phone || null,
+        email: input.email || null,
+        notes: input.notes || null,
       },
     });
   }

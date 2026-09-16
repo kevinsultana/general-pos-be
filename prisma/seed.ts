@@ -166,6 +166,7 @@ async function main() {
     'manage_customers',
     'view_promotions',
     'manage_printers',
+    'sync_data',
   ];
 
   for (const perm of allPermissions.filter((p) => cashierPermissionKeys.includes(p.key))) {

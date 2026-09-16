@@ -15,7 +15,7 @@ export const transactionItemInputSchema = z.object({
 
 export const transactionPaymentInputSchema = z.object({
   id: z.string().uuid().optional(),
-  paymentMethodId: z.string().uuid('ID Metode pembayaran harus valid'),
+  paymentMethodId: z.string().min(1, 'ID Metode pembayaran harus valid'),
   amount: z.number().positive('Nominal pembayaran harus lebih dari 0'),
   roundingAmount: z.number().default(0),
   metadata: z.any().optional(),

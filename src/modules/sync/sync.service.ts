@@ -62,8 +62,9 @@ export class SyncService {
     let failed = 0;
     let skipped = 0;
 
-    for (const event of events) {
-      const result = await SyncService.processSingleEvent(storeId, currentUserId, deviceId, event);
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      const result = await SyncService.processSingleEvent(storeId, currentUserId, deviceId, event, i);
       results.push(result);
 
       if (result.status === 'SYNCED') synced++;
@@ -84,7 +85,8 @@ export class SyncService {
     storeId: string,
     currentUserId: string,
     deviceId: string,
-    event: SyncEventInput
+    event: SyncEventInput,
+    sequenceOffset = 0
   ): Promise<SyncEventResult> {
     // 1. Idempotency: check if this eventId was already processed or is in-flight
     const existing = await prisma.syncEvent.findFirst({
@@ -143,6 +145,7 @@ export class SyncService {
           attemptCount: 1,
           lastAttemptAt: new Date(),
           createdById: currentUserId,
+          createdAt: new Date(Date.now() + sequenceOffset),
         },
         select: { id: true },
       });
@@ -157,7 +160,10 @@ export class SyncService {
       switch (event.operation) {
         case 'COMPLETE_TRANSACTION': {
           const payload = validatedPayload as any;
-          await TransactionsService.completeTransaction(storeId, payload, currentUserId);
+          await TransactionsService.completeTransaction(storeId, payload, currentUserId, {
+            allowNegativeStock: true,
+            allowInactiveProducts: true,
+          });
           break;
         }
 
@@ -198,8 +204,9 @@ export class SyncService {
         }
 
         case 'CREATE_CUSTOMER': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
           const parsed = createCustomerSchema.parse(validatedPayload);
-          await CustomersService.createCustomer(storeId, parsed);
+          await CustomersService.createCustomer(storeId, { ...parsed, id: entityId });
           break;
         }
 
@@ -255,7 +262,115 @@ export class SyncService {
           break;
         }
 
-        case 'REFUND_TRANSACTION':
+        case 'CREATE_CATEGORY': {
+          const cat = validatedPayload as any;
+          const entityId = event.entityId || cat.id;
+          await prisma.category.upsert({
+            where: { id: entityId },
+            create: {
+              id: entityId,
+              storeId,
+              name: cat.name || 'Kategori Baru',
+              active: cat.active ?? true,
+            },
+            update: {
+              name: cat.name,
+              active: cat.active,
+            },
+          });
+          break;
+        }
+
+        case 'UPDATE_CATEGORY': {
+          const cat = validatedPayload as any;
+          const entityId = event.entityId || cat.id;
+          await prisma.category.updateMany({
+            where: { id: entityId, storeId },
+            data: {
+              ...(cat.name ? { name: cat.name } : {}),
+              ...(cat.active !== undefined ? { active: cat.active } : {}),
+            },
+          });
+          break;
+        }
+
+        case 'DELETE_CATEGORY': {
+          const entityId = event.entityId || (validatedPayload as any)?.id;
+          await prisma.category.deleteMany({
+            where: { id: entityId, storeId },
+          });
+          break;
+        }
+
+        case 'REFUND_TRANSACTION': {
+          const payload = validatedPayload as any;
+          const trxId = payload.transactionId || event.entityId;
+          const refundId = payload.id || event.eventId;
+          const existingRefund = await prisma.refund.findUnique({
+            where: { id: refundId },
+          });
+          if (!existingRefund) {
+            const trx = await prisma.transaction.findFirst({
+              where: { id: trxId, storeId },
+              include: { items: true },
+            });
+            if (trx) {
+              const now = payload.refundedAt ? new Date(payload.refundedAt) : new Date();
+              const newStatus = payload.status || (payload.isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED');
+
+              await prisma.$transaction(async (tx) => {
+                const createdRefund = await tx.refund.create({
+                  data: {
+                    id: refundId,
+                    transactionId: trx.id,
+                    amount: payload.amount || trx.total,
+                    reason: payload.reason || 'Mobile Sync: Refund',
+                    status: 'COMPLETED',
+                    createdById: currentUserId,
+                    createdAt: now,
+                  },
+                });
+
+                const refundItems = payload.items as any[] | undefined;
+                if (refundItems && refundItems.length > 0) {
+                  for (const ri of refundItems) {
+                    const matchedItem = trx.items.find((it) => it.productId === ri.productId);
+                    await tx.refundItem.create({
+                      data: {
+                        refundId: createdRefund.id,
+                        transactionItemId: matchedItem?.id || trx.items[0]?.id,
+                        quantity: ri.quantity,
+                        amount: ri.refundAmount || 0,
+                      },
+                    });
+
+                    if (ri.variantId) {
+                      await tx.productVariant.update({
+                        where: { id: ri.variantId },
+                        data: { stock: { increment: ri.quantity } },
+                      });
+                    } else if (ri.productId) {
+                      await tx.product.update({
+                        where: { id: ri.productId },
+                        data: { stock: { increment: ri.quantity } },
+                      });
+                    }
+                  }
+                }
+
+                await tx.transaction.update({
+                  where: { id: trx.id },
+                  data: {
+                    status: newStatus as any,
+                    refundedAt: now,
+                  },
+                });
+              });
+            }
+          }
+          break;
+        }
+
         case 'CREATE':
         case 'UPDATE':
         case 'DELETE':
@@ -340,7 +455,7 @@ export class SyncService {
         NOT: { deviceId },
         createdAt: { gt: cursorDate },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: limit + 1, // +1 to detect hasMore
     });
 
@@ -427,6 +542,7 @@ export class SyncService {
     if (operation.includes('TRANSACTION')) return 'Transaction';
     if (operation.includes('STOCK')) return 'StockMovement';
     if (operation.includes('PRODUCT')) return 'Product';
+    if (operation.includes('CATEGORY')) return 'Category';
     if (operation.includes('CUSTOMER')) return 'Customer';
     if (operation.includes('PROMOTION')) return 'Promotion';
     if (operation.includes('PRINTER')) return 'Printer';

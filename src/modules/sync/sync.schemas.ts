@@ -17,7 +17,8 @@ const TransactionItemSyncSchema = z.object({
 
 const PaymentSyncSchema = z.object({
   id: z.string().uuid().optional(),
-  paymentMethodId: z.string().uuid(),
+  paymentMethodId: z.string().min(1),
+  paymentType: z.string().optional(),
   amount: z.number().positive(),
   roundingAmount: z.number().default(0),
   metadata: z.record(z.unknown()).optional(),
@@ -110,12 +111,21 @@ const PrinterSyncSchema = z.object({
   configuration: z.union([z.record(z.any()), z.string(), z.null()]).optional(),
 }).passthrough();
 
+const CategorySyncSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).optional(),
+  color: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
+  sortOrder: z.number().int().optional(),
+  active: z.boolean().optional(),
+}).passthrough();
+
 // ──── Event envelope ────
 
 export const SyncEventInputSchema = z.object({
   eventId: z.string().uuid(), // client-generated UUID for idempotency
   deviceId: z.string().min(1),
-  occurredAt: z.string().datetime(),
+  occurredAt: z.string().datetime({ offset: true }).or(z.string().min(1)),
   clientVersion: z.string().optional(),
   operation: z.enum([
     'COMPLETE_TRANSACTION',
@@ -134,6 +144,9 @@ export const SyncEventInputSchema = z.object({
     'CREATE_PRINTER',
     'UPDATE_PRINTER',
     'DELETE_PRINTER',
+    'CREATE_CATEGORY',
+    'UPDATE_CATEGORY',
+    'DELETE_CATEGORY',
     'CREATE',
     'UPDATE',
     'DELETE',
@@ -166,6 +179,7 @@ export function validateEventPayload(operation: string, payload: unknown) {
     case 'DELETE_CUSTOMER':
     case 'DELETE_PROMOTION':
     case 'DELETE_PRINTER':
+    case 'DELETE_CATEGORY':
     case 'DELETE':
       return DeletePayloadSchema.parse(payload);
     case 'CREATE_CUSTOMER':
@@ -177,6 +191,9 @@ export function validateEventPayload(operation: string, payload: unknown) {
     case 'CREATE_PRINTER':
     case 'UPDATE_PRINTER':
       return PrinterSyncSchema.parse(payload);
+    case 'CREATE_CATEGORY':
+    case 'UPDATE_CATEGORY':
+      return CategorySyncSchema.parse(payload);
     case 'REFUND_TRANSACTION':
     case 'CREATE':
     case 'UPDATE':
