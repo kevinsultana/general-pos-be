@@ -2,13 +2,37 @@ import { prisma } from '../../config/prisma.js';
 import { CreatePromotionInput, UpdatePromotionInput, ValidatePromoCodeInput } from './promotions.schemas.js';
 
 export class PromotionsService {
+  static formatPromotion(promo: any) {
+    if (!promo) return promo;
+    const valueNum = Number(promo.value);
+    const minPurchaseNum =
+      promo.minimumPurchase !== null && promo.minimumPurchase !== undefined
+        ? Number(promo.minimumPurchase)
+        : null;
+    const code = promo.codes?.[0]?.code || promo.code || null;
+
+    return {
+      ...promo,
+      // Official Prisma Decimal converted to JavaScript number
+      value: valueNum,
+      minimumPurchase: minPurchaseNum,
+      // Aliases for Dashboard & Mobile POS backward compatibility
+      discountValue: valueNum,
+      discountType: promo.type,
+      minSpend: minPurchaseNum ?? 0,
+      startDate: promo.startAt instanceof Date ? promo.startAt.toISOString() : promo.startAt,
+      endDate: promo.endAt instanceof Date ? promo.endAt.toISOString() : promo.endAt,
+      code,
+    };
+  }
+
   static async getPromotions(storeId: string, activeOnly?: boolean) {
     const where: any = { storeId };
     if (activeOnly) {
       where.active = true;
     }
 
-    return prisma.promotion.findMany({
+    const promos = await prisma.promotion.findMany({
       where,
       include: {
         codes: true,
@@ -19,6 +43,8 @@ export class PromotionsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return promos.map((p) => PromotionsService.formatPromotion(p));
   }
 
   static async getPromotionById(storeId: string, promotionId: string) {
@@ -37,11 +63,11 @@ export class PromotionsService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Promosi tidak ditemukan' };
     }
 
-    return promo;
+    return PromotionsService.formatPromotion(promo);
   }
 
   static async createPromotion(storeId: string, input: CreatePromotionInput) {
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       const promo = await tx.promotion.create({
         data: {
           storeId,
@@ -69,6 +95,11 @@ export class PromotionsService {
 
       return promo;
     });
+
+    return PromotionsService.formatPromotion({
+      ...created,
+      code: input.code ? input.code.toUpperCase() : null,
+    });
   }
 
   static async updatePromotion(storeId: string, promotionId: string, input: UpdatePromotionInput) {
@@ -80,7 +111,7 @@ export class PromotionsService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Promosi tidak ditemukan' };
     }
 
-    return prisma.promotion.update({
+    const updated = await prisma.promotion.update({
       where: { id: promotionId },
       data: {
         ...(input.name ? { name: input.name } : {}),
@@ -92,7 +123,12 @@ export class PromotionsService {
         ...(input.minimumPurchase !== undefined ? { minimumPurchase: input.minimumPurchase } : {}),
         ...(input.active !== undefined ? { active: input.active } : {}),
       },
+      include: {
+        codes: true,
+      },
     });
+
+    return PromotionsService.formatPromotion(updated);
   }
 
   static async validatePromoCode(storeId: string, input: ValidatePromoCodeInput) {

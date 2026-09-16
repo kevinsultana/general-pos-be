@@ -71,6 +71,7 @@ enum PromotionConditionType {
 enum PrinterRole {
   RECEIPT
   KITCHEN
+  BOTH
 }
 
 enum PrinterConnectionType {

@@ -198,4 +198,109 @@ describe('Transactions & Financial Integrity Tests', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(Number(prodCheck.body.data.stock)).toBe(99);
   });
+
+  // ──────────────── PRD Bab 21 & INV-013: Cash Rounding Tests ────────────────
+
+  it('PRD Bab 21: Rejects non-CASH payment with non-zero roundingAmount', async () => {
+    // Get QRIS payment method
+    const pmRes = await request(app)
+      .get('/api/v1/payment-methods')
+      .set('Authorization', `Bearer ${token}`);
+    const qrisPm = pmRes.body.data.find((pm: any) => pm.type !== 'CASH') || pmRes.body.data[1];
+
+    const res = await request(app)
+      .post('/api/v1/transactions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        id: uuidv4(),
+        subtotal: 10000,
+        roundingAmount: 200,
+        total: 10200,
+        items: [
+          {
+            productId,
+            quantity: 1,
+            unitPrice: 10000,
+            subtotal: 10000,
+            total: 10000,
+          },
+        ],
+        payments: [
+          {
+            paymentMethodId: qrisPm.id,
+            amount: 10200,
+            roundingAmount: 200, // ILLEGAL: QRIS must not have rounding
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('INVALID_ROUNDING_AMOUNT');
+  });
+
+  it('PRD Bab 21: Rejects transaction when Transaction.roundingAmount does not match sum of payments rounding', async () => {
+    const res = await request(app)
+      .post('/api/v1/transactions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        id: uuidv4(),
+        subtotal: 10000,
+        roundingAmount: 500, // Mismatched rounding
+        total: 10500,
+        items: [
+          {
+            productId,
+            quantity: 1,
+            unitPrice: 10000,
+            subtotal: 10000,
+            total: 10000,
+          },
+        ],
+        payments: [
+          {
+            paymentMethodId,
+            amount: 10200,
+            roundingAmount: 200,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('INVALID_ROUNDING_AMOUNT');
+  });
+
+  it('PRD Bab 21: Successfully completes transaction with CASH payment and valid roundingAmount', async () => {
+    const res = await request(app)
+      .post('/api/v1/transactions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        id: uuidv4(),
+        subtotal: 9800,
+        roundingAmount: 200,
+        total: 10000,
+        items: [
+          {
+            productId,
+            quantity: 1,
+            unitPrice: 9800,
+            subtotal: 9800,
+            total: 9800,
+          },
+        ],
+        payments: [
+          {
+            paymentMethodId, // CASH
+            amount: 9800,
+            roundingAmount: 200,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(Number(res.body.data.roundingAmount)).toBe(200);
+    expect(Number(res.body.data.total)).toBe(10000);
+  });
 });

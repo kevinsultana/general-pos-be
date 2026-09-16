@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { prisma } from '../src/config/prisma.js';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security Tests', () => {
@@ -19,6 +20,9 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
     expect(loginRes.status).toBe(200);
     token = loginRes.body.data.accessToken;
     storeId = loginRes.body.data.user.storeId;
+
+    // Clean up any lingering sync events for store to avoid pagination issues
+    await prisma.syncEvent.deleteMany({ where: { storeId } });
 
     // 3. Get Payment Method
     const pmRes = await request(app)

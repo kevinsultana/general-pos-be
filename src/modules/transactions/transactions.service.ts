@@ -129,13 +129,42 @@ export class TransactionsService {
       }
     }
 
+    // 3. Validate Cash Rounding rules (PRD Bab 21 & INV-013)
+    const paymentMethodIds = input.payments.map((p) => p.paymentMethodId);
+    const paymentMethods = await prisma.paymentMethod.findMany({
+      where: { id: { in: paymentMethodIds }, storeId },
+    });
+    const pmMap = new Map(paymentMethods.map((pm) => [pm.id, pm]));
+
+    for (const p of input.payments) {
+      const pm = pmMap.get(p.paymentMethodId);
+      const paymentType = pm?.type || (p.metadata as any)?.paymentType;
+      if (paymentType && paymentType !== 'CASH' && p.roundingAmount && p.roundingAmount !== 0) {
+        throw {
+          statusCode: 400,
+          code: 'INVALID_ROUNDING_AMOUNT',
+          message: `Cash rounding hanya berlaku untuk pembayaran CASH, namun metode "${pm?.name || p.paymentMethodId}" (${paymentType}) memiliki roundingAmount: ${p.roundingAmount}`,
+        };
+      }
+    }
+
+    const totalPaymentsRounding = input.payments.reduce((sum, p) => sum + (p.roundingAmount || 0), 0);
+    if (input.roundingAmount !== totalPaymentsRounding) {
+      throw {
+        statusCode: 400,
+        code: 'INVALID_ROUNDING_AMOUNT',
+        message: `Transaction roundingAmount (${input.roundingAmount}) harus sama dengan akumulasi rounding payments (${totalPaymentsRounding})`,
+      };
+    }
+
     // Generate Transaction Number if not provided
     const now = new Date();
     const datePrefix = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const transactionNumber = input.transactionNumber || `TRX-${datePrefix}-${randomSuffix}`;
+    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+    const transactionNumber =
+      input.transactionNumber || `TRX-${datePrefix}-${Date.now().toString().slice(-6)}-${randomSuffix}`;
 
-    // 3. Execute Atomic DB Transaction
+    // 4. Execute Atomic DB Transaction
     const result = await prisma.$transaction(async (tx) => {
       // Calculate paidTotal
       const paidTotal = input.payments.reduce((sum, p) => sum + p.amount, 0);
