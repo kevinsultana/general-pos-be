@@ -5,8 +5,8 @@ import { prisma } from './config/prisma.js';
 
 const app = createApp();
 
-const server = app.listen(env.PORT, () => {
-  logger.info(`General POS Backend API running on http://localhost:${env.PORT}`);
+const server = app.listen(env.PORT, '0.0.0.0', () => {
+  logger.info(`General POS Backend API running on http://0.0.0.0:${env.PORT}`);
   logger.info(`Health check: http://localhost:${env.PORT}/api/v1/health`);
 });
 

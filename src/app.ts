@@ -1,4 +1,4 @@
-import express, { Express, Request, Response } from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
@@ -33,28 +33,40 @@ export function createApp(): Express {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
-        imgSrc: ["'self'", 'data:', 'cdn.jsdelivr.net'],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'fonts.googleapis.com'],
+        imgSrc: ["'self'", 'data:', 'cdn.jsdelivr.net', 'validator.swagger.io'],
+        upgradeInsecureRequests: null, // Jangan paksa upgrade ke https saat diakses lewat HTTP biasa / Tailscale IP
       },
     },
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   }));
   app.use(cors());
   app.use(express.json());
 
   // ──── Swagger API Documentation ────
-  // Akses di browser: http://localhost:PORT/api-docs
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customSiteTitle: 'General POS API Docs',
-    customCss: `.swagger-ui .topbar { background-color: #1e1e2e; }
-      .swagger-ui .topbar-wrapper .link span { display: none; }
-      .swagger-ui .info h1 { color: #cba6f7; }`,
-    swaggerOptions: {
-      persistAuthorization: true,
-      displayRequestDuration: true,
-      filter: true,
+  // Akses di browser: http://localhost:PORT/api-docs atau via IP Tailscale
+  app.use(
+    '/api-docs',
+    (_req: Request, res: Response, next: NextFunction) => {
+      res.removeHeader('Content-Security-Policy');
+      res.removeHeader('Cross-Origin-Opener-Policy');
+      next();
     },
-  }));
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customSiteTitle: 'General POS API Docs',
+      customCss: `.swagger-ui .topbar { background-color: #1e1e2e; }
+        .swagger-ui .topbar-wrapper .link span { display: none; }
+        .swagger-ui .info h1 { color: #cba6f7; }`,
+      swaggerOptions: {
+        persistAuthorization: true,
+        displayRequestDuration: true,
+        filter: true,
+      },
+    })
+  );
   // Raw JSON spec endpoint
   app.get('/api-docs.json', (_req: Request, res: Response) => res.json(swaggerSpec));
 
