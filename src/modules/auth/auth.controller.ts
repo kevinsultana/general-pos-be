@@ -40,4 +40,13 @@ export class AuthController {
       next(err);
     }
   }
+
+  static async registerStore(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await AuthService.registerStore(req.body);
+      return sendSuccess(res, result, 'Pendaftaran toko berhasil', 201);
+    } catch (err) {
+      next(err);
+    }
+  }
 }

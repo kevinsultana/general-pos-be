@@ -89,4 +89,27 @@ describe('Auth Module API Tests', () => {
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
   });
+
+  it('POST /api/v1/auth/register-store creates a new tenant and returns 201 with tokens', async () => {
+    const randomSuffix = Math.floor(Math.random() * 10000);
+    const res = await request(app)
+      .post('/api/v1/auth/register-store')
+      .send({
+        storeName: `Toko Barista ${randomSuffix}`,
+        ownerName: 'Budi Santoso',
+        phone: '08123456789',
+        address: 'Jl. Melati No. 10',
+        username: `owner_${randomSuffix}`,
+        password: 'password123',
+        email: `owner_${randomSuffix}@example.com`,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.accessToken).toBeDefined();
+    expect(res.body.data.refreshToken).toBeDefined();
+    expect(res.body.data.store.name).toBe(`Toko Barista ${randomSuffix}`);
+    expect(res.body.data.store.plan).toBe('PRO');
+    expect(res.body.data.user.username).toBe(`owner_${randomSuffix}`);
+  });
 });

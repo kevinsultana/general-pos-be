@@ -58,14 +58,16 @@ export function createApp(): Express {
   // Raw JSON spec endpoint
   app.get('/api-docs.json', (_req: Request, res: Response) => res.json(swaggerSpec));
 
-  // Health Check Endpoint
-  app.get('/api/v1/health', (req: Request, res: Response) => {
+  // Health Check Endpoints
+  const healthHandler = (_req: Request, res: Response) => {
     return sendSuccess(res, {
       status: 'OK',
       timestamp: new Date().toISOString(),
       service: 'general-pos-backend',
     }, 'Backend API is running smoothly');
-  });
+  };
+  app.get('/health', healthHandler);
+  app.get('/api/v1/health', healthHandler);
 
   // Mount API Modules
   app.use('/api/v1/auth', authRoutes);
