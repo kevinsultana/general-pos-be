@@ -10,7 +10,10 @@ async function main() {
   // 1. Seed Store
   const store = await prisma.store.upsert({
     where: { id: DEFAULT_STORE_ID },
-    update: {},
+    update: {
+      subscriptionPlan: 'PRO',
+      subscriptionStatus: 'ACTIVE',
+    },
     create: {
       id: DEFAULT_STORE_ID,
       name: 'TOKO UMKM POS INDONESIA',
@@ -29,6 +32,8 @@ async function main() {
       cashRoundingEnabled: true,
       cashRoundingIncrement: 100,
       cashRoundingMode: 'ROUND_NEAREST',
+      subscriptionPlan: 'PRO',
+      subscriptionStatus: 'ACTIVE',
     },
   });
   console.log(`Store seeded: ${store.name} (${store.id})`);

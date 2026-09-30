@@ -249,7 +249,7 @@ export class AuthService {
           phone: input.phone,
           address: input.address,
           email: input.email,
-          subscriptionPlan: 'FREE',
+          subscriptionPlan: 'PRO',
           subscriptionStatus: 'ACTIVE',
         },
       });
