@@ -128,11 +128,18 @@ export class DashboardController {
         totalRevenue: Number(p._sum.total ?? 0),
       }));
 
-      // Calculate gross profit estimate (Revenue - Cost of items)
-      const costAgg = await prisma.transactionItem.aggregate({
+      // Calculate gross profit estimate from historical snapshot (Revenue - Cost of items)
+      // PRD / AGENTS.md § 14: Historical profit must not change when current product cost changes
+      const completedItems = await prisma.transactionItem.findMany({
         where: { transaction: { storeId, status: 'COMPLETED' } },
-        _sum: { subtotal: true },
+        select: { total: true, quantity: true, unitCostSnapshot: true },
       });
+
+      const totalGrossProfit = completedItems.reduce((acc, item) => {
+        const itemRevenue = Number(item.total);
+        const itemCost = Number(item.unitCostSnapshot) * Number(item.quantity);
+        return acc + (itemRevenue - itemCost);
+      }, 0);
 
       const totalRevenue = Number(totalSalesData._sum.total ?? 0);
       const todayRevenue = Number(todaySalesData._sum.total ?? 0);
@@ -144,6 +151,7 @@ export class DashboardController {
           allTime: totalRevenue,
           today: todayRevenue,
           thisMonth: monthRevenue,
+          grossProfit: totalGrossProfit,
         },
         transactions: {
           total: (completedCount + cancelledCount),

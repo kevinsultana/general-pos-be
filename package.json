@@ -12,9 +12,6 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "test": "vitest run"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "keywords": [
     "pos",
     "point-of-sale",

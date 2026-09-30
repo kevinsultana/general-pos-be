@@ -161,18 +161,26 @@ export class AuthService {
 
     const permissions = user.role.permissions.map((rp) => rp.permission.key);
 
-    return {
+    const userPayload = {
       id: user.id,
       username: user.username,
       displayName: user.displayName,
       email: user.email,
-      store: user.store,
+      storeId: user.storeId,
+      storeName: user.store.name,
       role: {
         id: user.role.id,
         name: user.role.name,
         isSystem: user.role.isSystem,
       },
       permissions,
+      active: user.active,
+    };
+
+    return {
+      user: userPayload,
+      store: user.store,
+      ...userPayload,
     };
   }
 

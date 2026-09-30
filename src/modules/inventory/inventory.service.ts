@@ -42,15 +42,43 @@ export class InventoryService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Produk tidak ditemukan' };
     }
 
+    let variant: any = null;
     if (input.variantId) {
-      const variant = product.variants.find((v) => v.id === input.variantId);
+      variant = product.variants.find((v) => v.id === input.variantId);
       if (!variant) {
         throw { statusCode: 404, code: 'NOT_FOUND', message: 'Varian produk tidak ditemukan' };
       }
     }
 
+    // Hitung Weighted Average Cost (WAC) jika tipe STOCK_IN dan unitCost disertakan
+    // Rumus PRD / AGENTS.md § 13.2:
+    // WAC = ((currentStock * currentCost) + (incomingQty * incomingUnitCost)) / (currentStock + incomingQty)
+    let calculatedCost: number | undefined;
+    if (input.type === 'STOCK_IN' && input.unitCost !== undefined) {
+      const incomingQty = Math.abs(input.quantityDelta);
+      const incomingUnitCost = input.unitCost;
+      const targetEntity = variant || product;
+      const currentStock = Number(targetEntity.stock);
+      const currentCost = Number(targetEntity.cost);
+
+      if (currentStock <= 0) {
+        calculatedCost = incomingUnitCost;
+      } else {
+        const totalQty = currentStock + incomingQty;
+        calculatedCost =
+          totalQty > 0
+            ? Number(
+                (
+                  (currentStock * currentCost + incomingQty * incomingUnitCost) /
+                  totalQty
+                ).toFixed(2)
+              )
+            : incomingUnitCost;
+      }
+    }
+
     const movement = await prisma.$transaction(async (tx) => {
-      // 1. Update product or variant stock
+      // 1. Update product or variant stock and cost
       if (input.variantId) {
         await tx.productVariant.update({
           where: { id: input.variantId },
@@ -58,6 +86,7 @@ export class InventoryService {
             stock: {
               increment: input.quantityDelta,
             },
+            ...(calculatedCost !== undefined ? { cost: calculatedCost } : {}),
           },
         });
       } else {
@@ -67,10 +96,7 @@ export class InventoryService {
             stock: {
               increment: input.quantityDelta,
             },
-            // If STOCK_IN and unitCost provided, update product cost
-            ...(input.type === 'STOCK_IN' && input.unitCost !== undefined
-              ? { cost: input.unitCost }
-              : {}),
+            ...(calculatedCost !== undefined ? { cost: calculatedCost } : {}),
           },
         });
       }
@@ -102,8 +128,11 @@ export class InventoryService {
       entityId: movement.id,
       afterData: {
         product: product.name,
+        variant: variant?.name,
         type: input.type,
         delta: input.quantityDelta,
+        unitCost: input.unitCost,
+        newCost: calculatedCost,
         reason: input.reason,
       },
     });

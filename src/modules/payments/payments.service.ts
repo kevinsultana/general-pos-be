@@ -33,9 +33,15 @@ export class PaymentsService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Metode pembayaran tidak ditemukan' };
     }
 
+    const { active, ...rest } = input as any;
+    const dataToUpdate = {
+      ...rest,
+      ...(active !== undefined && rest.enabled === undefined ? { enabled: active } : {}),
+    };
+
     return prisma.paymentMethod.update({
       where: { id: methodId },
-      data: input,
+      data: dataToUpdate,
     });
   }
 }

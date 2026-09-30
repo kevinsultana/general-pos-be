@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { SYSTEM_PERMISSIONS } from '../src/config/permissions.js';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/config/prisma.js';
 
 const DEFAULT_STORE_ID = '00000000-0000-0000-0000-000000000001';
 

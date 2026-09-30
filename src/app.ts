@@ -24,6 +24,7 @@ import auditRoutes from './modules/audit/audit.routes.js';
 import syncRoutes from './modules/sync/sync.routes.js';
 import subscriptionRoutes from './modules/subscription/subscription.routes.js';
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import reportsRoutes from './modules/reports/reports.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -99,6 +100,7 @@ export function createApp(): Express {
   app.use('/api/v1/sync', syncRoutes);
   app.use('/api/v1/subscription', subscriptionRoutes);
   app.use('/api/v1/dashboard', dashboardRoutes);
+  app.use('/api/v1/reports', reportsRoutes);
 
   // 404 Route Not Found
   app.use((req: Request, res: Response) => {
