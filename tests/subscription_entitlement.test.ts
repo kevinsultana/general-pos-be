@@ -125,7 +125,7 @@ describe('Phase 13 & 14: Subscription Entitlements & Concurrency Hardening', () 
     expect(syncRes.status).toBe(200);
   });
 
-  it('FREE tier store is rejected from sync and web dashboard with 403 UPGRADE_REQUIRED', async () => {
+  it('FREE tier store is rejected from sync and web dashboard with 403 SUBSCRIPTION_REQUIRED', async () => {
     // Downgrade store to FREE
     await request(app)
       .post('/api/v1/subscription/upgrade')
@@ -137,14 +137,14 @@ describe('Phase 13 & 14: Subscription Entitlements & Concurrency Hardening', () 
       .get('/api/v1/sync/pull?cursor=0&deviceId=dev-test-1')
       .set('Authorization', `Bearer ${authToken}`);
     expect(syncRes.status).toBe(403);
-    expect(syncRes.body.error.code).toBe('UPGRADE_REQUIRED');
+    expect(syncRes.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
 
     // Dashboard summary should be rejected
     const dashRes = await request(app)
       .get('/api/v1/dashboard/summary')
       .set('Authorization', `Bearer ${authToken}`);
     expect(dashRes.status).toBe(403);
-    expect(dashRes.body.error.code).toBe('UPGRADE_REQUIRED');
+    expect(dashRes.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
   });
 
   it('PAID tier store can sync, but is rejected from PRO web dashboard', async () => {
@@ -165,7 +165,7 @@ describe('Phase 13 & 14: Subscription Entitlements & Concurrency Hardening', () 
       .get('/api/v1/dashboard/summary')
       .set('Authorization', `Bearer ${authToken}`);
     expect(dashRes.status).toBe(403);
-    expect(dashRes.body.error.code).toBe('UPGRADE_REQUIRED');
+    expect(dashRes.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
   });
 
   it('Stock Guard: Prevents overselling when stock is insufficient (zero negative stock)', async () => {

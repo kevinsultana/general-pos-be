@@ -82,12 +82,30 @@ export class AuthService {
         email: user.email,
         storeId: user.storeId,
         storeName: user.store.name,
+        tier: user.store.subscriptionPlan,
+        canCloudSync: user.store.subscriptionPlan !== 'FREE',
+        stores: [
+          {
+            id: user.store.id,
+            name: user.store.name,
+            tier: user.store.subscriptionPlan,
+            status: user.store.subscriptionStatus,
+          },
+        ],
         role: {
           id: user.role.id,
           name: user.role.name,
           isSystem: user.role.isSystem,
         },
         permissions,
+      },
+      store: {
+        id: user.store.id,
+        name: user.store.name,
+        plan: user.store.subscriptionPlan,
+        subscriptionPlan: user.store.subscriptionPlan,
+        status: user.store.subscriptionStatus,
+        subscriptionStatus: user.store.subscriptionStatus,
       },
     };
   }
@@ -168,6 +186,16 @@ export class AuthService {
       email: user.email,
       storeId: user.storeId,
       storeName: user.store.name,
+      tier: user.store.subscriptionPlan,
+      canCloudSync: user.store.subscriptionPlan !== 'FREE',
+      stores: [
+        {
+          id: user.store.id,
+          name: user.store.name,
+          tier: user.store.subscriptionPlan,
+          status: user.store.subscriptionStatus,
+        },
+      ],
       role: {
         id: user.role.id,
         name: user.role.name,
@@ -179,7 +207,10 @@ export class AuthService {
 
     return {
       user: userPayload,
-      store: user.store,
+      store: {
+        ...user.store,
+        plan: user.store.subscriptionPlan,
+      },
       ...userPayload,
     };
   }
@@ -218,7 +249,7 @@ export class AuthService {
           phone: input.phone,
           address: input.address,
           email: input.email,
-          subscriptionPlan: 'PRO',
+          subscriptionPlan: 'FREE',
           subscriptionStatus: 'ACTIVE',
         },
       });
@@ -348,16 +379,31 @@ export class AuthService {
           username: user.username,
           displayName: user.displayName,
           email: user.email,
+          storeId: user.storeId,
+          storeName: store.name,
+          tier: store.subscriptionPlan,
+          canCloudSync: store.subscriptionPlan !== 'FREE',
+          stores: [
+            {
+              id: store.id,
+              name: store.name,
+              tier: store.subscriptionPlan,
+              status: store.subscriptionStatus,
+            },
+          ],
           role: {
             id: ownerRole.id,
             name: ownerRole.name,
           },
+          permissions,
         },
         store: {
           id: store.id,
           name: store.name,
           plan: store.subscriptionPlan,
+          subscriptionPlan: store.subscriptionPlan,
           status: store.subscriptionStatus,
+          subscriptionStatus: store.subscriptionStatus,
         },
       };
     });

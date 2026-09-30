@@ -7,6 +7,7 @@ import { requireAuth } from '../../middlewares/auth.middleware.js';
 const router = Router();
 
 router.post('/register-store', validateBody(registerStoreSchema), AuthController.registerStore);
+router.post('/register', validateBody(registerStoreSchema), AuthController.registerStore);
 router.post('/login', validateBody(loginSchema), AuthController.login);
 router.post('/refresh', validateBody(refreshTokenSchema), AuthController.refresh);
 router.get('/me', requireAuth, AuthController.me);

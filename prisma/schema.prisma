@@ -149,7 +149,7 @@ model Store {
   cashRoundingIncrement   Int              @default(100)
   cashRoundingMode        CashRoundingMode @default(ROUND_NEAREST)
 
-  subscriptionPlan        SubscriptionPlan   @default(PRO)
+  subscriptionPlan        SubscriptionPlan   @default(FREE)
   subscriptionStatus      SubscriptionStatus @default(ACTIVE)
   subscriptionExpiresAt   DateTime?          @db.Timestamptz(3)
 

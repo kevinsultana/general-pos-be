@@ -64,7 +64,7 @@ export function requirePlan(minimumPlan: PlanTier) {
       if (currentLevel < requiredLevel) {
         return sendError(
           res,
-          'UPGRADE_REQUIRED',
+          'SUBSCRIPTION_REQUIRED',
           `Fitur ini memerlukan paket langganan minimal "${minimumPlan}". Paket Anda saat ini adalah "${store.subscriptionPlan}".`,
           403,
           {

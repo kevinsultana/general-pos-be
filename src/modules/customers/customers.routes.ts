@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { CustomersController } from './customers.controller.js';
 import { requireAuth } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/rbac.middleware.js';
+import { requirePlan } from '../../middlewares/entitlement.middleware.js';
 import { validateBody } from '../../middlewares/validate.middleware.js';
 import { createCustomerSchema, updateCustomerSchema } from './customers.schemas.js';
 
 const router = Router();
 
 router.use(requireAuth);
+router.use(requirePlan('PAID'));
 
 router.get('/', requirePermission('manage_customers'), CustomersController.getCustomers);
 router.get('/:id', requirePermission('manage_customers'), CustomersController.getCustomerById);

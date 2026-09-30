@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { CategoriesController } from './categories.controller.js';
 import { requireAuth } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/rbac.middleware.js';
+import { requirePlan } from '../../middlewares/entitlement.middleware.js';
 import { validateBody } from '../../middlewares/validate.middleware.js';
 import { createCategorySchema, updateCategorySchema } from './categories.schemas.js';
 
 const router = Router();
 
 router.use(requireAuth);
+router.use(requirePlan('PAID'));
 
 router.get('/', requirePermission('view_products'), CategoriesController.getCategories);
 router.get('/:id', requirePermission('view_products'), CategoriesController.getCategoryById);
