@@ -9,6 +9,7 @@ export const createUserSchema = z.object({
 });
 
 export const updateUserSchema = z.object({
+  username: z.string().min(3, 'Username minimal 3 karakter').max(30).optional(),
   displayName: z.string().min(2).max(100).optional(),
   email: z.string().email().optional(),
   roleId: z.string().uuid().optional(),

@@ -125,6 +125,15 @@ export class UsersService {
       throw { statusCode: 400, code: 'CANNOT_DEACTIVATE_OWNER', message: 'Akun Owner utama tidak boleh dinonaktifkan' };
     }
 
+    if (input.username && input.username !== existing.username) {
+      const taken = await prisma.user.findFirst({
+        where: { username: input.username },
+      });
+      if (taken) {
+        throw { statusCode: 400, code: 'USERNAME_TAKEN', message: 'Username sudah digunakan, silakan pilih username lain' };
+      }
+    }
+
     let passwordHash: string | undefined;
     if (input.password) {
       passwordHash = await hashPassword(input.password);
@@ -133,6 +142,7 @@ export class UsersService {
     const updated = await prisma.user.update({
       where: { id: userId },
       data: {
+        ...(input.username ? { username: input.username } : {}),
         ...(input.displayName ? { displayName: input.displayName } : {}),
         ...(input.email !== undefined ? { email: input.email } : {}),
         ...(input.roleId ? { roleId: input.roleId } : {}),

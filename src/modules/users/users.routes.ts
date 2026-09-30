@@ -13,5 +13,6 @@ router.get('/', requirePermission('view_users'), UsersController.getUsers);
 router.get('/:id', requirePermission('view_users'), UsersController.getUserById);
 router.post('/', requirePermission('manage_users'), validateBody(createUserSchema), UsersController.createUser);
 router.patch('/:id', requirePermission('manage_users'), validateBody(updateUserSchema), UsersController.updateUser);
+router.put('/:id', requirePermission('manage_users'), validateBody(updateUserSchema), UsersController.updateUser);
 
 export default router;

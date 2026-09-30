@@ -11,5 +11,6 @@ router.use(requireAuth);
 
 router.get('/', requirePermission('view_store'), StoreController.getStore);
 router.patch('/', requirePermission('manage_store'), validateBody(updateStoreSchema), StoreController.updateStore);
+router.put('/', requirePermission('manage_store'), validateBody(updateStoreSchema), StoreController.updateStore);
 
 export default router;
