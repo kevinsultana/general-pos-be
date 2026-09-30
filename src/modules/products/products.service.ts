@@ -78,13 +78,44 @@ export class ProductsService {
     input: CreateProductInput,
     currentUserId: string
   ) {
-    // 1. Check category
-    const category = await prisma.category.findFirst({
-      where: { id: input.categoryId, storeId },
-    });
+    const productId = (input as any).id;
+    if (productId) {
+      const existingProduct = await prisma.product.findFirst({
+        where: { id: productId, storeId },
+        include: { variants: true, category: true },
+      });
+      if (existingProduct) {
+        return existingProduct;
+      }
+    }
 
-    if (!category) {
-      throw { statusCode: 400, code: 'INVALID_CATEGORY', message: 'Kategori tidak valid' };
+    // 1. Check or resolve category (fallback to "Umum" if null/empty or not found)
+    let targetCategoryId = input.categoryId;
+    if (targetCategoryId) {
+      const category = await prisma.category.findFirst({
+        where: { id: targetCategoryId, storeId },
+      });
+      if (!category) {
+        let defaultCat = await prisma.category.findFirst({
+          where: { storeId, name: 'Umum' },
+        });
+        if (!defaultCat) {
+          defaultCat = await prisma.category.create({
+            data: { storeId, name: 'Umum', active: true },
+          });
+        }
+        targetCategoryId = defaultCat.id;
+      }
+    } else {
+      let defaultCat = await prisma.category.findFirst({
+        where: { storeId, name: 'Umum' },
+      });
+      if (!defaultCat) {
+        defaultCat = await prisma.category.create({
+          data: { storeId, name: 'Umum', active: true },
+        });
+      }
+      targetCategoryId = defaultCat.id;
     }
 
     // 2. Check SKU uniqueness
@@ -111,8 +142,9 @@ export class ProductsService {
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
         data: {
+          ...(productId ? { id: productId } : {}),
           storeId,
-          categoryId: input.categoryId,
+          categoryId: targetCategoryId!,
           name: input.name,
           sku: input.sku || null,
           barcode: input.barcode || null,
@@ -125,6 +157,7 @@ export class ProductsService {
           variants: input.variants && input.variants.length > 0
             ? {
                 create: input.variants.map((v) => ({
+                  ...(v.id ? { id: v.id } : {}),
                   name: v.name,
                   sku: v.sku || null,
                   barcode: v.barcode || null,
@@ -261,19 +294,39 @@ export class ProductsService {
       if (input.variants) {
         for (const v of input.variants) {
           if (v.id) {
-            await tx.productVariant.update({
+            const existingVar = await tx.productVariant.findUnique({
               where: { id: v.id },
-              data: {
-                name: v.name,
-                sku: v.sku || null,
-                barcode: v.barcode || null,
-                cost: v.cost,
-                sellingPrice: v.sellingPrice,
-                stock: v.stock,
-                lowStockThreshold: v.lowStockThreshold,
-                active: v.active,
-              },
             });
+            if (existingVar) {
+              await tx.productVariant.update({
+                where: { id: v.id },
+                data: {
+                  name: v.name,
+                  sku: v.sku || null,
+                  barcode: v.barcode || null,
+                  cost: v.cost,
+                  sellingPrice: v.sellingPrice,
+                  stock: v.stock,
+                  lowStockThreshold: v.lowStockThreshold,
+                  active: v.active,
+                },
+              });
+            } else {
+              await tx.productVariant.create({
+                data: {
+                  id: v.id,
+                  productId,
+                  name: v.name,
+                  sku: v.sku || null,
+                  barcode: v.barcode || null,
+                  cost: v.cost,
+                  sellingPrice: v.sellingPrice,
+                  stock: v.stock,
+                  lowStockThreshold: v.lowStockThreshold,
+                  active: v.active,
+                },
+              });
+            }
           } else {
             await tx.productVariant.create({
               data: {

@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 export const productVariantInputSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   name: z.string().min(1, 'Nama varian wajib diisi'),
-  sku: z.string().optional(),
-  barcode: z.string().optional(),
+  sku: z.string().optional().nullable(),
+  barcode: z.string().optional().nullable(),
   cost: z.number().min(0, 'HPP modal tidak boleh negatif'),
   sellingPrice: z.number().min(0, 'Harga jual tidak boleh negatif'),
   stock: z.number().default(0),
@@ -13,21 +13,28 @@ export const productVariantInputSchema = z.object({
 });
 
 export const createProductSchema = z.object({
-  categoryId: z.string().uuid('ID Kategori harus valid'),
+  id: z.string().optional(),
+  categoryId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
   name: z.string().min(1, 'Nama produk wajib diisi').max(150),
-  sku: z.string().optional(),
-  barcode: z.string().optional(),
+  sku: z.string().optional().nullable(),
+  barcode: z.string().optional().nullable(),
   cost: z.number().min(0, 'HPP modal tidak boleh negatif'),
   sellingPrice: z.number().min(0, 'Harga jual tidak boleh negatif'),
   stock: z.number().default(0),
   lowStockThreshold: z.number().default(0),
-  imageReference: z.string().optional(),
+  imageReference: z.string().optional().nullable(),
   active: z.boolean().default(true),
   variants: z.array(productVariantInputSchema).optional(),
 });
 
 export const updateProductSchema = z.object({
-  categoryId: z.string().uuid().optional(),
+  categoryId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
   name: z.string().min(1).max(150).optional(),
   sku: z.string().optional().nullable(),
   barcode: z.string().optional().nullable(),

@@ -3,20 +3,27 @@ import { z } from 'zod';
 // ──── Single Sync Event Schema ────
 
 const TransactionItemSyncSchema = z.object({
-  id: z.string().uuid().optional(),
-  productId: z.string().uuid(),
-  variantId: z.string().uuid().optional(),
+  id: z.string().optional(),
+  productId: z.string().min(1),
+  productName: z.string().optional(),
+  variantId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
   quantity: z.number().positive(), // DECIMAL(18,3) — supports fractional quantities
   unitPrice: z.number().nonnegative(),
-  discountType: z.enum(['PERCENTAGE', 'FIXED_AMOUNT']).optional().nullable(),
+  discountType: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.enum(['PERCENTAGE', 'FIXED_AMOUNT']).optional().nullable()
+  ),
   discountValue: z.number().optional().nullable(),
-  discountAmount: z.number().nonnegative(),
+  discountAmount: z.number().nonnegative().default(0),
   subtotal: z.number().nonnegative(),
   total: z.number().nonnegative(),
 });
 
 const PaymentSyncSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   paymentMethodId: z.string().min(1),
   paymentType: z.string().optional(),
   amount: z.number().positive(),
@@ -25,16 +32,28 @@ const PaymentSyncSchema = z.object({
 });
 
 const CompleteTransactionPayloadSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   transactionNumber: z.string().optional(),
-  customerId: z.string().uuid().optional().nullable(),
-  promotionId: z.string().uuid().optional().nullable(),
-  orderType: z.enum(['DINE_IN', 'TAKEAWAY', 'DELIVERY', 'ONLINE']).optional().nullable(),
+  customerId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
+  promotionId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
+  orderType: z.preprocess(
+    (val) => (val === 'GENERAL' || val === '' || val === null || val === undefined ? null : val),
+    z.enum(['DINE_IN', 'TAKEAWAY', 'DELIVERY', 'ONLINE']).optional().nullable()
+  ),
   queueNumber: z.string().optional().nullable(),
   subtotal: z.number().nonnegative(),
-  discountType: z.enum(['PERCENTAGE', 'FIXED_AMOUNT']).optional().nullable(),
+  discountType: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.enum(['PERCENTAGE', 'FIXED_AMOUNT']).optional().nullable()
+  ),
   discountValue: z.number().optional().nullable(),
-  discountTotal: z.number().nonnegative(),
+  discountTotal: z.number().nonnegative().default(0),
   roundingAmount: z.number().default(0),
   total: z.number().nonnegative(),
   items: z.array(TransactionItemSyncSchema).min(1),
@@ -66,7 +85,7 @@ const DeletePayloadSchema = z.object({
 }).passthrough();
 
 const CustomerSyncSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   name: z.string().min(1).optional(),
   phone: z.string().optional().nullable(),
   email: z.string().optional().nullable(),
@@ -74,8 +93,11 @@ const CustomerSyncSchema = z.object({
 }).passthrough();
 
 const ProductSyncSchema = z.object({
-  id: z.string().uuid().optional(),
-  categoryId: z.string().uuid().optional(),
+  id: z.string().optional(),
+  categoryId: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : val),
+    z.string().optional().nullable()
+  ),
   name: z.string().min(1).optional(),
   sku: z.string().optional().nullable(),
   barcode: z.string().optional().nullable(),
@@ -89,7 +111,7 @@ const ProductSyncSchema = z.object({
 }).passthrough();
 
 const PromotionSyncSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   name: z.string().min(1).optional(),
   code: z.string().optional().nullable(),
   type: z.enum(['PERCENTAGE', 'FIXED_AMOUNT', 'FIXED']).optional(),
@@ -102,7 +124,7 @@ const PromotionSyncSchema = z.object({
 }).passthrough();
 
 const PrinterSyncSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   name: z.string().min(1).optional(),
   connectionType: z.enum(['BLUETOOTH', 'USB', 'NETWORK']).optional(),
   addressReference: z.string().optional().nullable(),
@@ -116,7 +138,7 @@ const PrinterSyncSchema = z.object({
 }).passthrough();
 
 const CategorySyncSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().optional(),
   name: z.string().min(1).optional(),
   color: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
@@ -127,9 +149,9 @@ const CategorySyncSchema = z.object({
 // ──── Event envelope ────
 
 export const SyncEventInputSchema = z.object({
-  eventId: z.string().uuid(), // client-generated UUID for idempotency
+  eventId: z.string().min(1), // client-generated ID for idempotency
   deviceId: z.string().min(1),
-  occurredAt: z.string().datetime({ offset: true }).or(z.string().min(1)),
+  occurredAt: z.string().min(1),
   clientVersion: z.string().optional(),
   operation: z.enum([
     'COMPLETE_TRANSACTION',
@@ -156,7 +178,7 @@ export const SyncEventInputSchema = z.object({
     'DELETE',
     'EVENT',
   ]),
-  entityId: z.string().uuid(),
+  entityId: z.string().min(1),
   payload: z.unknown(), // validated per operation below
 });
 

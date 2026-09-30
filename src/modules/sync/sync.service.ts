@@ -399,19 +399,30 @@ export class SyncService {
         case 'CREATE_CATEGORY': {
           const cat = validatedPayload as any;
           const entityId = event.entityId || cat.id;
-          await prisma.category.upsert({
-            where: { id: entityId },
-            create: {
-              id: entityId,
-              storeId,
-              name: cat.name || 'Kategori Baru',
-              active: cat.active ?? true,
-            },
-            update: {
-              name: cat.name,
-              active: cat.active,
-            },
+          const catName = cat.name || 'Kategori Baru';
+          const existingByName = await prisma.category.findFirst({
+            where: { storeId, name: catName },
           });
+          if (existingByName) {
+            await prisma.category.update({
+              where: { id: existingByName.id },
+              data: { active: cat.active ?? true },
+            });
+          } else {
+            await prisma.category.upsert({
+              where: { id: entityId },
+              create: {
+                id: entityId,
+                storeId,
+                name: catName,
+                active: cat.active ?? true,
+              },
+              update: {
+                name: catName,
+                active: cat.active,
+              },
+            });
+          }
           break;
         }
 

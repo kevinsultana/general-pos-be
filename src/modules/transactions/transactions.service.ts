@@ -121,13 +121,53 @@ export class TransactionsService {
     const productMap = new Map(products.map((p) => [p.id, p]));
 
     for (const item of input.items) {
-      const product = productMap.get(item.productId);
-      if (!product || (!product.active && !options?.allowInactiveProducts)) {
-        throw {
-          statusCode: 400,
-          code: 'PRODUCT_INACTIVE_OR_NOT_FOUND',
-          message: `Produk "${item.productId}" tidak ditemukan atau non-aktif`,
-        };
+      let product = productMap.get(item.productId);
+      if (!product) {
+        let defaultCat = await prisma.category.findFirst({ where: { storeId } });
+        if (!defaultCat) {
+          defaultCat = await prisma.category.create({
+            data: { storeId, name: 'Umum', active: true },
+          });
+        }
+        product = await prisma.product.create({
+          data: {
+            id: item.productId,
+            storeId,
+            categoryId: defaultCat.id,
+            name: item.productName || 'Produk POS',
+            cost: 0,
+            sellingPrice: item.unitPrice,
+            stock: 0,
+            active: true,
+          },
+          include: { variants: true },
+        });
+        productMap.set(product.id, product);
+      }
+
+      if (item.variantId) {
+        let variant = product.variants.find((v) => v.id === item.variantId);
+        if (!variant) {
+          const existingVariant = await prisma.productVariant.findUnique({
+            where: { id: item.variantId },
+          });
+          if (existingVariant) {
+            product.variants.push(existingVariant);
+          } else {
+            const stubVariant = await prisma.productVariant.create({
+              data: {
+                id: item.variantId,
+                productId: product.id,
+                name: 'Varian POS',
+                cost: 0,
+                sellingPrice: item.unitPrice,
+                stock: 0,
+                active: true,
+              },
+            });
+            product.variants.push(stubVariant);
+          }
+        }
       }
     }
 
@@ -297,13 +337,14 @@ export class TransactionsService {
           },
         });
 
-        // Deduct stock with atomic guard to prevent negative stock (overselling)
+        // Deduct stock (allow negative stock per AGENTS.md 13.5 unless explicitly disallowed)
+        const blockNegativeStock = options?.allowNegativeStock === false;
         if (item.variantId) {
           const currentVariant = await tx.productVariant.findUnique({
             where: { id: item.variantId },
             select: { stock: true },
           });
-          if (!options?.allowNegativeStock && (!currentVariant || Number(currentVariant.stock) < item.quantity)) {
+          if (blockNegativeStock && (!currentVariant || Number(currentVariant.stock) < item.quantity)) {
             throw {
               statusCode: 409,
               code: 'INSUFFICIENT_STOCK',
@@ -319,7 +360,7 @@ export class TransactionsService {
             where: { id: item.productId },
             select: { stock: true },
           });
-          if (!options?.allowNegativeStock && (!currentProd || Number(currentProd.stock) < item.quantity)) {
+          if (blockNegativeStock && (!currentProd || Number(currentProd.stock) < item.quantity)) {
             throw {
               statusCode: 409,
               code: 'INSUFFICIENT_STOCK',

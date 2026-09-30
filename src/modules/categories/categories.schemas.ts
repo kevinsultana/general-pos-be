@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const createCategorySchema = z.object({
+  id: z.string().optional(),
   name: z.string().min(1, 'Nama kategori wajib diisi').max(100),
   active: z.boolean().default(true),
 });

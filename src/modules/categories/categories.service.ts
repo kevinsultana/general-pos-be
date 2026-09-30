@@ -29,16 +29,25 @@ export class CategoriesService {
   }
 
   static async createCategory(storeId: string, input: CreateCategoryInput) {
+    const categoryId = (input as any).id;
+    if (categoryId) {
+      const existingById = await prisma.category.findFirst({
+        where: { id: categoryId, storeId },
+      });
+      if (existingById) return existingById;
+    }
+
     const existing = await prisma.category.findFirst({
       where: { storeId, name: input.name },
     });
 
     if (existing) {
-      throw { statusCode: 409, code: 'DUPLICATE_CATEGORY', message: 'Kategori dengan nama ini sudah ada' };
+      return existing; // idempotent return for sync & direct push
     }
 
     const created = await prisma.category.create({
       data: {
+        ...(categoryId ? { id: categoryId } : {}),
         storeId,
         name: input.name,
         active: input.active,
