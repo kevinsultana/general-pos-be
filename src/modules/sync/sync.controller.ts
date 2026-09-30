@@ -2,12 +2,50 @@ import { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendError } from '../../utils/response.js';
 import { SyncService } from './sync.service.js';
 import { PushRequestSchema } from './sync.schemas.js';
+import { prisma } from '../../config/prisma.js';
 
 export class SyncController {
   static async push(req: Request, res: Response, next: NextFunction) {
     try {
       const storeId = req.user!.storeId;
       const currentUserId = req.user!.userId;
+
+      // 1. Verify store subscription plan entitlement (PAID or PRO required for cloud sync)
+      const store = await prisma.store.findUnique({
+        where: { id: storeId },
+        select: {
+          subscriptionPlan: true,
+          subscriptionStatus: true,
+          subscriptionExpiresAt: true,
+        },
+      });
+
+      if (!store) {
+        return sendError(res, 'NOT_FOUND', 'Toko tidak ditemukan', 404);
+      }
+
+      if (
+        store.subscriptionStatus === 'EXPIRED' ||
+        (store.subscriptionExpiresAt && store.subscriptionExpiresAt < new Date())
+      ) {
+        return sendError(
+          res,
+          'SUBSCRIPTION_EXPIRED',
+          'Langganan toko Anda telah kedaluwarsa. Silakan perbarui paket langganan Anda.',
+          403,
+          { currentPlan: store.subscriptionPlan, status: 'EXPIRED' }
+        );
+      }
+
+      if (store.subscriptionPlan !== 'PAID' && store.subscriptionPlan !== 'PRO') {
+        return sendError(
+          res,
+          'SUBSCRIPTION_REQUIRED',
+          `Fitur sinkronisasi data ke cloud memerlukan paket langganan minimal "PAID" atau "PRO". Paket Anda saat ini adalah "${store.subscriptionPlan}".`,
+          403,
+          { currentPlan: store.subscriptionPlan, requiredPlan: 'PRO' }
+        );
+      }
 
       // Validate request body
       const parseResult = PushRequestSchema.safeParse(req.body);

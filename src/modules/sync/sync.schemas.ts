@@ -39,16 +39,20 @@ const CompleteTransactionPayloadSchema = z.object({
   total: z.number().nonnegative(),
   items: z.array(TransactionItemSyncSchema).min(1),
   payments: z.array(PaymentSyncSchema).min(1),
-});
+  createdAt: z.string().optional(),
+  completedAt: z.string().optional(),
+}).passthrough();
 
 const AdjustStockPayloadSchema = z.object({
+  id: z.string().uuid().optional(),
   productId: z.string().uuid(),
-  variantId: z.string().uuid().optional(),
+  variantId: z.string().uuid().optional().nullable(),
   type: z.enum(['INITIAL', 'STOCK_IN', 'SALE', 'ADJUSTMENT', 'CANCEL_REVERSAL', 'REFUND_REVERSAL']),
-  quantityDelta: z.number().int(),
-  unitCost: z.number().optional(),
-  reason: z.string().optional(),
-});
+  quantityDelta: z.number(),
+  unitCost: z.number().optional().nullable(),
+  reason: z.string().optional().nullable(),
+  createdAt: z.string().optional(),
+}).passthrough();
 
 const CancelTransactionPayloadSchema = z.object({
   transactionId: z.string().uuid(),

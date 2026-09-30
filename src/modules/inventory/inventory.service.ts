@@ -104,6 +104,7 @@ export class InventoryService {
       // 2. Create StockMovement record
       return tx.stockMovement.create({
         data: {
+          id: (input as any).id || undefined,
           storeId,
           productId: input.productId,
           variantId: input.variantId || null,
@@ -112,6 +113,7 @@ export class InventoryService {
           unitCost: input.unitCost || null,
           reason: input.reason,
           createdById: currentUserId,
+          createdAt: (input as any).createdAt ? new Date((input as any).createdAt) : undefined,
         },
         include: {
           product: { select: { id: true, name: true } },

@@ -57,6 +57,31 @@ export class SyncService {
     deviceId: string,
     events: SyncEventInput[]
   ): Promise<PushResult> {
+    // Entitlement verification: require PAID or PRO tier for cloud sync
+    const store = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { subscriptionPlan: true, subscriptionStatus: true, subscriptionExpiresAt: true },
+    });
+
+    if (!store || (store.subscriptionPlan !== 'PAID' && store.subscriptionPlan !== 'PRO')) {
+      throw {
+        statusCode: 403,
+        code: 'SUBSCRIPTION_REQUIRED',
+        message: 'Fitur sinkronisasi data ke cloud memerlukan paket langganan minimal PAID atau PRO',
+      };
+    }
+
+    if (
+      store.subscriptionStatus === 'EXPIRED' ||
+      (store.subscriptionExpiresAt && store.subscriptionExpiresAt < new Date())
+    ) {
+      throw {
+        statusCode: 403,
+        code: 'SUBSCRIPTION_EXPIRED',
+        message: 'Langganan toko Anda telah kedaluwarsa. Silakan perbarui paket langganan Anda.',
+      };
+    }
+
     const results: SyncEventResult[] = [];
     let synced = 0;
     let failed = 0;
@@ -169,7 +194,14 @@ export class SyncService {
 
         case 'ADJUST_STOCK': {
           const payload = validatedPayload as any;
-          await InventoryService.adjustStock(storeId, payload, currentUserId);
+          await InventoryService.adjustStock(
+            storeId,
+            {
+              ...payload,
+              id: payload.id || event.eventId,
+            },
+            currentUserId
+          );
           break;
         }
 
@@ -185,15 +217,117 @@ export class SyncService {
         }
 
         case 'CREATE_PRODUCT': {
-          const parsed = createProductSchema.parse(validatedPayload);
-          await ProductsService.createProduct(storeId, parsed, currentUserId);
+          const raw = validatedPayload as any;
+          const entityId = event.entityId || raw.id;
+
+          // 1. Ensure category exists or fallback to a default category
+          let catId = raw.categoryId;
+          if (catId) {
+            const catExists = await prisma.category.findFirst({ where: { id: catId, storeId } });
+            if (!catExists) {
+              await prisma.category.create({
+                data: {
+                  id: catId,
+                  storeId,
+                  name: raw.categoryName || 'Umum',
+                  active: true,
+                },
+              });
+            }
+          } else {
+            let defaultCat = await prisma.category.findFirst({ where: { storeId } });
+            if (!defaultCat) {
+              defaultCat = await prisma.category.create({
+                data: {
+                  storeId,
+                  name: 'Umum',
+                  active: true,
+                },
+              });
+            }
+            catId = defaultCat.id;
+          }
+
+          // 2. Check if product already exists by ID or by SKU (upsert pattern for sync)
+          const existingProduct = entityId
+            ? await prisma.product.findFirst({ where: { id: entityId, storeId } })
+            : (raw.sku ? await prisma.product.findFirst({ where: { sku: raw.sku, storeId } }) : null);
+
+          if (existingProduct) {
+            await prisma.product.update({
+              where: { id: existingProduct.id },
+              data: {
+                name: raw.name ?? existingProduct.name,
+                categoryId: catId,
+                cost: raw.cost !== undefined ? raw.cost : existingProduct.cost,
+                sellingPrice: raw.sellingPrice !== undefined ? raw.sellingPrice : existingProduct.sellingPrice,
+                stock: raw.stock !== undefined ? raw.stock : existingProduct.stock,
+                lowStockThreshold: raw.lowStockThreshold !== undefined ? raw.lowStockThreshold : existingProduct.lowStockThreshold,
+                sku: raw.sku !== undefined ? (raw.sku || null) : existingProduct.sku,
+                barcode: raw.barcode !== undefined ? (raw.barcode || null) : existingProduct.barcode,
+                active: raw.active ?? existingProduct.active,
+              },
+            });
+          } else {
+            await prisma.product.create({
+              data: {
+                ...(entityId ? { id: entityId } : {}),
+                storeId,
+                categoryId: catId,
+                name: raw.name || 'Produk',
+                sku: raw.sku || null,
+                barcode: raw.barcode || null,
+                cost: raw.cost ?? 0,
+                sellingPrice: raw.sellingPrice ?? 0,
+                stock: raw.stock ?? 0,
+                lowStockThreshold: raw.lowStockThreshold ?? 0,
+                imageReference: raw.imageReference || null,
+                active: raw.active ?? true,
+                ...(raw.variants && raw.variants.length > 0
+                  ? {
+                      variants: {
+                        create: raw.variants.map((v: any) => ({
+                          ...(v.id ? { id: v.id } : {}),
+                          name: v.name,
+                          sku: v.sku || null,
+                          barcode: v.barcode || null,
+                          cost: v.cost ?? 0,
+                          sellingPrice: v.sellingPrice ?? 0,
+                          stock: v.stock ?? 0,
+                          lowStockThreshold: v.lowStockThreshold ?? 0,
+                          active: v.active ?? true,
+                        })),
+                      },
+                    }
+                  : {}),
+              },
+            });
+          }
           break;
         }
 
         case 'UPDATE_PRODUCT': {
-          const parsed = updateProductSchema.parse(validatedPayload);
-          const entityId = event.entityId || (validatedPayload as any)?.id;
-          await ProductsService.updateProduct(storeId, entityId, parsed, currentUserId);
+          const raw = validatedPayload as any;
+          const entityId = event.entityId || raw.id;
+          if (entityId) {
+            const existing = await prisma.product.findFirst({ where: { id: entityId, storeId } });
+            if (existing) {
+              await prisma.product.update({
+                where: { id: existing.id },
+                data: {
+                  ...(raw.name ? { name: raw.name } : {}),
+                  ...(raw.categoryId ? { categoryId: raw.categoryId } : {}),
+                  ...(raw.cost !== undefined ? { cost: raw.cost } : {}),
+                  ...(raw.sellingPrice !== undefined ? { sellingPrice: raw.sellingPrice } : {}),
+                  ...(raw.stock !== undefined ? { stock: raw.stock } : {}),
+                  ...(raw.lowStockThreshold !== undefined ? { lowStockThreshold: raw.lowStockThreshold } : {}),
+                  ...(raw.sku !== undefined ? { sku: raw.sku || null } : {}),
+                  ...(raw.barcode !== undefined ? { barcode: raw.barcode || null } : {}),
+                  ...(raw.active !== undefined ? { active: raw.active } : {}),
+                },
+              });
+            }
+          }
           break;
         }
 

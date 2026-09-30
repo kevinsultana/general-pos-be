@@ -832,5 +832,201 @@ describe('Phase 11 — Cloud POS Hardening: Sync Engine, Idempotency & Security 
     });
     expect(Number(updatedProd?.stock)).toBe(-2);
   });
+
+  // ──────────────── 9. Free-to-Pro & Local Migration Sync Tests ────────────────
+
+  it('Sync Push: Free tier store is rejected with SUBSCRIPTION_REQUIRED', async () => {
+    // 1. Create a FREE tier store
+    const freeStore = await prisma.store.create({
+      data: {
+        name: `Free Store ${Date.now()}`,
+        subscriptionPlan: 'FREE',
+        subscriptionStatus: 'ACTIVE',
+      },
+    });
+
+    // Create owner for free store
+    const freeOwner = await prisma.user.create({
+      data: {
+        storeId: freeStore.id,
+        username: `freeowner_${Date.now()}`,
+        passwordHash: 'dummy_hash',
+        displayName: 'Free Owner',
+        role: 'OWNER',
+      },
+    });
+
+    // Generate JWT token for free owner
+    const jwt = await import('jsonwebtoken');
+    const freeToken = jwt.default.sign(
+      {
+        userId: freeOwner.id,
+        storeId: freeStore.id,
+        role: 'OWNER',
+        permissions: ['sync_data', 'create_transaction'],
+      },
+      process.env.JWT_SECRET || 'pos_jwt_secret_dev_key_super_secure',
+      { expiresIn: '1h' }
+    );
+
+    const res = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${freeToken}`)
+      .send({
+        events: [
+          {
+            eventId: uuidv4(),
+            deviceId: 'dev-free-01',
+            occurredAt: new Date().toISOString(),
+            operation: 'ADJUST_STOCK',
+            entityId: uuidv4(),
+            payload: {
+              productId: uuidv4(),
+              quantityDelta: 1,
+              type: 'ADJUSTMENT',
+            },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('SUBSCRIPTION_REQUIRED');
+
+    // Clean up
+    await prisma.user.delete({ where: { id: freeOwner.id } });
+    await prisma.store.delete({ where: { id: freeStore.id } });
+  });
+
+  it('Sync Push: Accepts historical createdAt & completedAt from offline transactions', async () => {
+    const historicalTrxId = uuidv4();
+    const eventId = uuidv4();
+    const historicalTime = '2026-08-15T10:15:30.000Z';
+
+    const res = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        events: [
+          {
+            eventId,
+            deviceId: 'dev-hist-01',
+            occurredAt: historicalTime,
+            operation: 'COMPLETE_TRANSACTION',
+            entityId: historicalTrxId,
+            payload: {
+              id: historicalTrxId,
+              transactionNumber: `TRX-HIST-${Date.now()}`,
+              subtotal: 15000,
+              discountTotal: 0,
+              roundingAmount: 0,
+              total: 15000,
+              createdAt: historicalTime,
+              completedAt: historicalTime,
+              items: [
+                {
+                  productId,
+                  quantity: 1,
+                  unitPrice: 15000,
+                  discountAmount: 0,
+                  subtotal: 15000,
+                  total: 15000,
+                },
+              ],
+              payments: [
+                {
+                  paymentMethodId: 'pm-cash',
+                  amount: 15000,
+                  roundingAmount: 0,
+                  paymentType: 'CASH',
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.synced).toBe(1);
+
+    // Verify database stored the historical timestamp
+    const savedTrx = await prisma.transaction.findUnique({
+      where: { id: historicalTrxId },
+    });
+    expect(savedTrx).toBeDefined();
+    expect(savedTrx?.completedAt?.toISOString()).toBe(historicalTime);
+  });
+
+  it('Sync Push: Upsert offline product with entityId without conflict', async () => {
+    const offlineProdId = uuidv4();
+    const eventId1 = uuidv4();
+    const sku = `OFFLINE-SKU-${Date.now()}`;
+
+    // 1. First push creates product with entityId
+    const res1 = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        events: [
+          {
+            eventId: eventId1,
+            deviceId: 'dev-upsert-01',
+            occurredAt: new Date().toISOString(),
+            operation: 'CREATE_PRODUCT',
+            entityId: offlineProdId,
+            payload: {
+              name: 'Produk Offline Asli',
+              sku,
+              cost: 4000,
+              sellingPrice: 7000,
+              stock: 25,
+            },
+          },
+        ],
+      });
+
+    expect(res1.status).toBe(200);
+    expect(res1.body.data.synced).toBe(1);
+
+    const savedProd1 = await prisma.product.findUnique({
+      where: { id: offlineProdId },
+    });
+    expect(savedProd1).toBeDefined();
+    expect(savedProd1?.name).toBe('Produk Offline Asli');
+    expect(savedProd1?.sku).toBe(sku);
+
+    // 2. Second push with same entityId / SKU updates rather than throwing 409
+    const eventId2 = uuidv4();
+    const res2 = await request(app)
+      .post('/api/v1/sync/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        events: [
+          {
+            eventId: eventId2,
+            deviceId: 'dev-upsert-01',
+            occurredAt: new Date().toISOString(),
+            operation: 'CREATE_PRODUCT',
+            entityId: offlineProdId,
+            payload: {
+              name: 'Produk Offline Terupdate',
+              sku,
+              cost: 4500,
+              sellingPrice: 8000,
+              stock: 30,
+            },
+          },
+        ],
+      });
+
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.synced).toBe(1);
+
+    const savedProd2 = await prisma.product.findUnique({
+      where: { id: offlineProdId },
+    });
+    expect(savedProd2?.name).toBe('Produk Offline Terupdate');
+    expect(Number(savedProd2?.sellingPrice)).toBe(8000);
+  });
 });
+
 

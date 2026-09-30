@@ -36,7 +36,9 @@ export const completeTransactionSchema = z.object({
   roundingAmount: z.number().default(0),
   total: z.number().min(0),
   promotionId: z.string().uuid().optional().nullable(),
-});
+  createdAt: z.string().optional(),
+  completedAt: z.string().optional(),
+}).passthrough();
 
 export const cancelTransactionSchema = z.object({
   reason: z.string().min(1, 'Alasan pembatalan transaksi wajib diisi'),

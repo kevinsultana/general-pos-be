@@ -233,6 +233,10 @@ export class TransactionsService {
       // Calculate paidTotal
       const paidTotal = input.payments.reduce((sum, p) => sum + p.amount, 0);
 
+      // Support historical offline timestamps when syncing
+      const trxCreatedAt = (input as any).createdAt ? new Date((input as any).createdAt) : now;
+      const trxCompletedAt = (input as any).completedAt ? new Date((input as any).completedAt) : now;
+
       // Create Transaction
       const trx = await tx.transaction.create({
         data: {
@@ -252,7 +256,8 @@ export class TransactionsService {
           paidTotal,
           promotionId: input.promotionId || null,
           createdById: currentUserId,
-          completedAt: now,
+          createdAt: trxCreatedAt,
+          completedAt: trxCompletedAt,
         },
       });
 
@@ -339,6 +344,7 @@ export class TransactionsService {
             referenceId: trx.id,
             reason: `Penjualan ${trx.transactionNumber}`,
             createdById: currentUserId,
+            createdAt: trxCompletedAt,
           },
         });
       }
@@ -354,7 +360,7 @@ export class TransactionsService {
             roundingAmount: p.roundingAmount,
             status: 'COMPLETED',
             metadata: p.metadata ?? undefined,
-            paidAt: now,
+            paidAt: trxCompletedAt,
           },
         });
       }
