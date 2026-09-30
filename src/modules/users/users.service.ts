@@ -57,6 +57,25 @@ export class UsersService {
   }
 
   static async createUser(storeId: string, input: CreateUserInput, currentUserId: string) {
+    // Check store subscription tier quota (FREE tier only allows 1 user: Owner)
+    const store = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { subscriptionPlan: true },
+    });
+
+    if (store?.subscriptionPlan === 'FREE') {
+      const activeUserCount = await prisma.user.count({
+        where: { storeId, active: true },
+      });
+      if (activeUserCount >= 1) {
+        throw {
+          statusCode: 403,
+          code: 'SUBSCRIPTION_REQUIRED',
+          message: 'Paket FREE dibatasi untuk 1 pengguna (Owner). Silakan upgrade ke paket PRO untuk menambah staf kasir.',
+        };
+      }
+    }
+
     // Check if username already exists in this store
     const existing = await prisma.user.findFirst({
       where: { storeId, username: input.username },

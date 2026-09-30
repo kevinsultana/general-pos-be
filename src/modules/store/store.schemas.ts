@@ -6,6 +6,7 @@ export const updateStoreSchema = z.object({
   address: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
+  receiptFooter: z.string().optional(),
   currency: z.string().default('IDR').optional(),
   timezone: z.string().default('Asia/Jakarta').optional(),
   language: z.string().default('id').optional(),

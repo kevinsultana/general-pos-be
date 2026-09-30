@@ -24,9 +24,11 @@ export class StoreService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Toko tidak ditemukan' };
     }
 
+    const { receiptFooter, ...prismaData } = input as any;
+
     const updated = await prisma.store.update({
       where: { id: storeId },
-      data: input,
+      data: prismaData,
     });
 
     await AuditService.record({
@@ -38,6 +40,9 @@ export class StoreService {
       afterData: input,
     });
 
-    return updated;
+    return {
+      ...updated,
+      ...(receiptFooter !== undefined ? { receiptFooter } : {}),
+    };
   }
 }
