@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../../config/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CompleteTransactionInput, CancelTransactionInput } from './transactions.schemas.js';
 
 export class TransactionsService {
@@ -381,7 +382,10 @@ export class TransactionsService {
       },
     });
 
-    return this.getTransactionById(storeId, result.id);
+    const fullTrx = await this.getTransactionById(storeId, result.id);
+    await SyncService.recordServerEvent(storeId, 'COMPLETE_TRANSACTION', result.id, fullTrx, currentUserId);
+
+    return fullTrx;
   }
 
   static async cancelTransaction(
@@ -467,6 +471,20 @@ export class TransactionsService {
       metadata: { reason: input.reason, transactionNumber: trx.transactionNumber },
     });
 
-    return this.getTransactionById(storeId, transactionId);
+    const cancelledTrx = await this.getTransactionById(storeId, transactionId);
+    await SyncService.recordServerEvent(
+      storeId,
+      'CANCEL_TRANSACTION',
+      transactionId,
+      {
+        transactionId,
+        id: transactionId,
+        reason: input.reason,
+        transaction: cancelledTrx,
+      },
+      currentUserId
+    );
+
+    return cancelledTrx;
   }
 }

@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreatePromotionInput, UpdatePromotionInput, ValidatePromoCodeInput } from './promotions.schemas.js';
 
 export class PromotionsService {
@@ -96,10 +97,14 @@ export class PromotionsService {
       return promo;
     });
 
-    return PromotionsService.formatPromotion({
+    const formatted = PromotionsService.formatPromotion({
       ...created,
       code: input.code ? input.code.toUpperCase() : null,
     });
+
+    await SyncService.recordServerEvent(storeId, 'CREATE_PROMOTION', created.id, formatted);
+
+    return formatted;
   }
 
   static async updatePromotion(storeId: string, promotionId: string, input: UpdatePromotionInput) {
@@ -128,7 +133,10 @@ export class PromotionsService {
       },
     });
 
-    return PromotionsService.formatPromotion(updated);
+    const formatted = PromotionsService.formatPromotion(updated);
+    await SyncService.recordServerEvent(storeId, 'UPDATE_PROMOTION', promotionId, formatted);
+
+    return formatted;
   }
 
   static async validatePromoCode(storeId: string, input: ValidatePromoCodeInput) {
@@ -216,6 +224,8 @@ export class PromotionsService {
       await tx.promotionCondition.deleteMany({ where: { promotionId } });
       await tx.promotion.delete({ where: { id: promotionId } });
     });
+
+    await SyncService.recordServerEvent(storeId, 'DELETE_PROMOTION', promotionId, { id: promotionId });
 
     return true;
   }

@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreatePrinterInput, UpdatePrinterInput } from './printers.schemas.js';
 
 function normalizeConfiguration(config: any) {
@@ -39,7 +40,7 @@ export class PrintersService {
   }
 
   static async createPrinter(storeId: string, input: CreatePrinterInput) {
-    return prisma.printer.create({
+    const created = await prisma.printer.create({
       data: {
         storeId,
         name: input.name,
@@ -54,6 +55,9 @@ export class PrintersService {
         configuration: normalizeConfiguration(input.configuration),
       },
     });
+
+    await SyncService.recordServerEvent(storeId, 'CREATE_PRINTER', created.id, created);
+    return created;
   }
 
   static async upsertPrinter(storeId: string, input: CreatePrinterInput & { id?: string }) {
@@ -94,7 +98,7 @@ export class PrintersService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Printer tidak ditemukan' };
     }
 
-    return prisma.printer.update({
+    const updated = await prisma.printer.update({
       where: { id: printerId },
       data: {
         ...(input.name ? { name: input.name } : {}),
@@ -111,6 +115,9 @@ export class PrintersService {
           : {}),
       },
     });
+
+    await SyncService.recordServerEvent(storeId, 'UPDATE_PRINTER', printerId, updated);
+    return updated;
   }
 
   static async deletePrinter(storeId: string, printerId: string) {
@@ -125,6 +132,8 @@ export class PrintersService {
     await prisma.printer.delete({
       where: { id: printerId },
     });
+
+    await SyncService.recordServerEvent(storeId, 'DELETE_PRINTER', printerId, { id: printerId });
 
     return true;
   }

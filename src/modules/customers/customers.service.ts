@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreateCustomerInput, UpdateCustomerInput } from './customers.schemas.js';
 
 export class CustomersService {
@@ -48,7 +49,7 @@ export class CustomersService {
 
   static async createCustomer(storeId: string, input: CreateCustomerInput & { id?: string }) {
     if (input.id) {
-      return prisma.customer.upsert({
+      const res = await prisma.customer.upsert({
         where: { id: input.id },
         create: {
           id: input.id,
@@ -65,9 +66,11 @@ export class CustomersService {
           notes: input.notes || null,
         },
       });
+      await SyncService.recordServerEvent(storeId, 'CREATE_CUSTOMER', res.id, res);
+      return res;
     }
 
-    return prisma.customer.create({
+    const created = await prisma.customer.create({
       data: {
         storeId,
         name: input.name,
@@ -76,6 +79,9 @@ export class CustomersService {
         notes: input.notes || null,
       },
     });
+
+    await SyncService.recordServerEvent(storeId, 'CREATE_CUSTOMER', created.id, created);
+    return created;
   }
 
   static async updateCustomer(storeId: string, customerId: string, input: UpdateCustomerInput) {
@@ -87,10 +93,13 @@ export class CustomersService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Pelanggan tidak ditemukan' };
     }
 
-    return prisma.customer.update({
+    const updated = await prisma.customer.update({
       where: { id: customerId },
       data: input,
     });
+
+    await SyncService.recordServerEvent(storeId, 'UPDATE_CUSTOMER', customerId, updated);
+    return updated;
   }
 
   static async deleteCustomer(storeId: string, customerId: string) {
@@ -114,6 +123,8 @@ export class CustomersService {
     await prisma.customer.delete({
       where: { id: customerId },
     });
+
+    await SyncService.recordServerEvent(storeId, 'DELETE_CUSTOMER', customerId, { id: customerId });
 
     return true;
   }

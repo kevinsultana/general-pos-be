@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreateRefundInput } from './refunds.schemas.js';
 
 export class RefundsService {
@@ -161,6 +162,21 @@ export class RefundsService {
         reason: input.reason,
       },
     });
+
+    await SyncService.recordServerEvent(
+      storeId,
+      'REFUND_TRANSACTION',
+      refund.id,
+      {
+        transactionId,
+        refundId: refund.id,
+        items: input.items,
+        totalRefundAmount,
+        reason: input.reason,
+        refund,
+      },
+      currentUserId
+    );
 
     return refund;
   }

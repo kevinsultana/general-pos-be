@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreateCategoryInput, UpdateCategoryInput } from './categories.schemas.js';
 
 export class CategoriesService {
@@ -36,13 +37,17 @@ export class CategoriesService {
       throw { statusCode: 409, code: 'DUPLICATE_CATEGORY', message: 'Kategori dengan nama ini sudah ada' };
     }
 
-    return prisma.category.create({
+    const created = await prisma.category.create({
       data: {
         storeId,
         name: input.name,
         active: input.active,
       },
     });
+
+    await SyncService.recordServerEvent(storeId, 'CREATE_CATEGORY', created.id, created);
+
+    return created;
   }
 
   static async updateCategory(storeId: string, categoryId: string, input: UpdateCategoryInput) {
@@ -54,10 +59,14 @@ export class CategoriesService {
       throw { statusCode: 404, code: 'NOT_FOUND', message: 'Kategori tidak ditemukan' };
     }
 
-    return prisma.category.update({
+    const updated = await prisma.category.update({
       where: { id: categoryId },
       data: input,
     });
+
+    await SyncService.recordServerEvent(storeId, 'UPDATE_CATEGORY', categoryId, updated);
+
+    return updated;
   }
 
   static async deleteCategory(storeId: string, categoryId: string) {
@@ -81,6 +90,8 @@ export class CategoriesService {
     await prisma.category.delete({
       where: { id: categoryId },
     });
+
+    await SyncService.recordServerEvent(storeId, 'DELETE_CATEGORY', categoryId, { id: categoryId });
 
     return true;
   }

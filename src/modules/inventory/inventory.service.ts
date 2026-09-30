@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreateStockMovementInput } from './inventory.schemas.js';
 
 export class InventoryService {
@@ -138,6 +139,8 @@ export class InventoryService {
         reason: input.reason,
       },
     });
+
+    await SyncService.recordServerEvent(storeId, 'ADJUST_STOCK', movement.id, movement, currentUserId);
 
     return movement;
   }

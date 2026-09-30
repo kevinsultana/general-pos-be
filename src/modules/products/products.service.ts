@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
+import { SyncService } from '../sync/sync.service.js';
 import { CreateProductInput, UpdateProductInput } from './products.schemas.js';
 
 export class ProductsService {
@@ -194,6 +195,8 @@ export class ProductsService {
       },
     });
 
+    await SyncService.recordServerEvent(storeId, 'CREATE_PRODUCT', product.id, product, currentUserId);
+
     return product;
   }
 
@@ -314,7 +317,9 @@ export class ProductsService {
       });
     }
 
-    return this.getProductById(storeId, productId);
+    const finalProduct = await this.getProductById(storeId, productId);
+    await SyncService.recordServerEvent(storeId, 'UPDATE_PRODUCT', productId, finalProduct, currentUserId);
+    return finalProduct;
   }
 
   static async deleteProduct(storeId: string, productId: string, currentUserId: string) {
@@ -333,9 +338,10 @@ export class ProductsService {
 
     // If product has transaction history, soft delete by deactivating
     if (existing._count.transactionItems > 0) {
-      await prisma.product.update({
+      const updated = await prisma.product.update({
         where: { id: productId },
         data: { active: false, discontinued: true },
+        include: { variants: true },
       });
 
       await AuditService.record({
@@ -346,6 +352,8 @@ export class ProductsService {
         entityId: productId,
         reason: 'Produk memiliki riwayat transaksi, dinonaktifkan secara aman',
       });
+
+      await SyncService.recordServerEvent(storeId, 'UPDATE_PRODUCT', productId, updated, currentUserId);
 
       return { deleted: false, deactivated: true };
     }
@@ -364,6 +372,8 @@ export class ProductsService {
       entityType: 'Product',
       entityId: productId,
     });
+
+    await SyncService.recordServerEvent(storeId, 'DELETE_PRODUCT', productId, { id: productId }, currentUserId);
 
     return { deleted: true, deactivated: false };
   }

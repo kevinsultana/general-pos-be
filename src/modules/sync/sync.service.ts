@@ -581,6 +581,60 @@ export class SyncService {
     // We use the auto-increment-style approach: events ordered by createdAt + their row id
     const cursorDate = cursorStr !== '0' ? new Date(parseInt(cursorStr, 10)) : new Date(0);
 
+    // Initial pull backfill: if cursor is 0, ensure all existing entities have sync events so new devices get full data
+    if (cursorStr === '0') {
+      try {
+        const [categories, products, customers, promotions] = await Promise.all([
+          prisma.category.findMany({ where: { storeId } }),
+          prisma.product.findMany({ where: { storeId }, include: { variants: true } }),
+          prisma.customer.findMany({ where: { storeId } }),
+          prisma.promotion.findMany({ where: { storeId } }),
+        ]);
+
+        for (const cat of categories) {
+          const exists = await prisma.syncEvent.findFirst({
+            where: { storeId, entityId: cat.id, entityType: 'Category' },
+            select: { id: true },
+          });
+          if (!exists) {
+            await SyncService.recordServerEvent(storeId, 'CREATE_CATEGORY', cat.id, cat);
+          }
+        }
+
+        for (const prod of products) {
+          const exists = await prisma.syncEvent.findFirst({
+            where: { storeId, entityId: prod.id, entityType: 'Product' },
+            select: { id: true },
+          });
+          if (!exists) {
+            await SyncService.recordServerEvent(storeId, 'CREATE_PRODUCT', prod.id, prod);
+          }
+        }
+
+        for (const cust of customers) {
+          const exists = await prisma.syncEvent.findFirst({
+            where: { storeId, entityId: cust.id, entityType: 'Customer' },
+            select: { id: true },
+          });
+          if (!exists) {
+            await SyncService.recordServerEvent(storeId, 'CREATE_CUSTOMER', cust.id, cust);
+          }
+        }
+
+        for (const promo of promotions) {
+          const exists = await prisma.syncEvent.findFirst({
+            where: { storeId, entityId: promo.id, entityType: 'Promotion' },
+            select: { id: true },
+          });
+          if (!exists) {
+            await SyncService.recordServerEvent(storeId, 'CREATE_PROMOTION', promo.id, promo);
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`[Sync] Notice during initial pull backfill: ${err?.message || err}`);
+      }
+    }
+
     const events = await prisma.syncEvent.findMany({
       where: {
         storeId,
@@ -670,6 +724,42 @@ export class SyncService {
         syncedAt: e.syncedAt?.toISOString() || null,
       })),
     };
+  }
+
+  static async recordServerEvent(
+    storeId: string,
+    operation: string,
+    entityId: string,
+    payload: unknown,
+    userId?: string
+  ) {
+    try {
+      const syncOp: 'CREATE' | 'UPDATE' | 'DELETE' | 'EVENT' =
+        operation.startsWith('CREATE') ? 'CREATE'
+        : operation.startsWith('UPDATE') ? 'UPDATE'
+        : operation.startsWith('DELETE') ? 'DELETE'
+        : 'EVENT';
+
+      await prisma.syncEvent.create({
+        data: {
+          storeId,
+          deviceId: 'server',
+          entityType: SyncService.getEntityType(operation),
+          entityId,
+          operation: syncOp,
+          payload: {
+            operation,
+            data: payload,
+          } as any,
+          status: 'SYNCED',
+          syncedAt: new Date(),
+          attemptCount: 1,
+          createdById: userId || null,
+        },
+      });
+    } catch (err: any) {
+      logger.error(`[Sync] Failed to record server event ${operation} on ${entityId}: ${err?.message || err}`);
+    }
   }
 
   private static getEntityType(operation: string): string {
