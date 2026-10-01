@@ -7,6 +7,15 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum BusinessPreset {
+  FNB
+  RETAIL
+  SERVICE
+  BOOKING
+  PHARMACY
+  CUSTOM
+}
+
 enum SubscriptionPlan {
   FREE
   PLUS
@@ -27,6 +36,62 @@ enum PaymentStatus {
   FAILURE
 }
 
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  TRANSFER
+  DEBIT
+}
+
+enum PaymentStatusOrder {
+  PAID
+  UNPAID
+  PARTIAL
+}
+
+enum OrderType {
+  DIRECT
+  DINE_IN
+  TAKE_AWAY
+  DELIVERY
+  SERVICE_IN
+}
+
+enum POStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+enum OpnameStatus {
+  DRAFT
+  COMPLETED
+}
+
+enum TransferStatus {
+  PENDING      // Dikirim dari cabang asal, stok asal sudah dipotong
+  RECEIVED     // Diterima di cabang tujuan, stok tujuan bertambah
+  CANCELLED    // Dibatalkan, stok asal dikembalikan
+}
+
 model Tenant {
   id                    String                @id @default(uuid())
   name                  String
@@ -36,11 +101,28 @@ model Tenant {
   billingCycle          String?               // "monthly" | "yearly"
   subscriptionExpiresAt DateTime?
   proJoinedAt           DateTime?             // Tanggal pertama kali upgrade ke paket PRO
+  businessPreset        BusinessPreset        @default(RETAIL)
+  businessConfig        Json?                 // { enableModifiers: true, enableMultiUnit: true, enableVariants: true, ... }
+  isOnboardingCompleted Boolean               @default(false)
 
   branches              Branch[]
   roles                 Role[]
   users                 User[]
   payments              SubscriptionPayment[]
+  categories            Category[]
+  products              Product[]
+  modifierGroups        ModifierGroup[]
+  shifts                CashierShift[]
+  orders                Order[]
+  suppliers             Supplier[]
+  purchaseOrders        PurchaseOrder[]
+  stockOpnames          StockOpname[]
+  expenseCategories     ExpenseCategory[]
+  expenses              Expense[]
+  customers             Customer[]
+  debtPayments          DebtPayment[]
+  stockTransfers        StockTransfer[]
+  receiptSetting        ReceiptSetting?
 
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -80,6 +162,15 @@ model Branch {
   isMain       Boolean      @default(true)
 
   userBranches UserBranch[]
+  stocks       ProductStock[]
+  shifts       CashierShift[]
+  orders       Order[]
+  purchaseOrders PurchaseOrder[]
+  stockOpnames   StockOpname[]
+  expenses       Expense[]
+  debtPayments   DebtPayment[]
+  transfersFrom  StockTransfer[] @relation("TransferFrom")
+  transfersTo    StockTransfer[] @relation("TransferTo")
 
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -122,6 +213,14 @@ model User {
   allBranchesAccess Boolean      @default(false)
 
   userBranches      UserBranch[]
+  shifts            CashierShift[]
+  orders            Order[]
+  purchaseOrders    PurchaseOrder[]
+  stockOpnames      StockOpname[]
+  expenses          Expense[]
+  debtPayments      DebtPayment[]
+  sentTransfers     StockTransfer[] @relation("TransferSender")
+  receivedTransfers StockTransfer[] @relation("TransferReceiver")
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -140,3 +239,511 @@ model UserBranch {
 
   @@unique([userId, branchId])
 }
+
+model Category {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  color     String?   // Kode warna hex (misal: "#f59e0b") untuk kartu kasir
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  products  Product[]
+
+  @@index([tenantId])
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  name        String
+  sku         String?
+  barcode     String?
+  description String?
+  image       String?
+
+  basePrice   Int       @default(0) // Harga jual dasar (Rp)
+  cogs        Int       @default(0) // Harga modal (Cost of Goods Sold / HPP)
+
+  isService   Boolean   @default(false) // Jika true, abaikan perhitungan stok fisik
+  trackStock  Boolean   @default(true)  // Apakah item ini melacak jumlah stok fisik
+
+  // Relasi modular
+  variants        ProductVariant[]
+  stocks          ProductStock[]
+  unitPrices      ProductUnit[]
+  modifierGroups  ProductModifierGroup[]
+
+  // Relasi jika produk ini dijadikan bahan baku/item fisik yang dipotong oleh ModifierOption
+  modifierOptions    ModifierOption[] @relation("InventoryProductModifier")
+  orderItems         OrderItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  stockOpnameItems   StockOpnameItem[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([barcode])
+  @@index([sku])
+}
+
+model ProductStock {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  quantity  Float    @default(0) // Mendukung angka pecahan (misal: 1.5 Kg)
+  minStock  Int      @default(5) // Ambang batas peringatan stok menipis
+
+  batchNo   String?
+  expiredAt DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, branchId])
+  @@index([branchId])
+}
+
+model ProductVariant {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String   // Contoh: "Large", "Iced", "Merah - XL"
+  priceAdj  Int      @default(0) // Penyesuaian harga (+/- Rp)
+  sku       String?
+  barcode   String?
+
+  @@index([productId])
+}
+
+model ModifierGroup {
+  id          String                 @id @default(uuid())
+  tenantId    String
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String                 // Contoh: "Level Gula", "Topping Tambahan"
+  isRequired  Boolean                @default(false)
+  isMultiple  Boolean                @default(false)
+
+  options     ModifierOption[]
+  products    ProductModifierGroup[]
+
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([tenantId])
+}
+
+model ModifierOption {
+  id                 String        @id @default(uuid())
+  modifierGroupId    String
+  modifierGroup      ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+  name               String        // Contoh: "Less Sugar 50%", "Extra Boba"
+  price              Int           @default(0) // Biaya tambahan ke customer (Rp)
+
+  // LOGIKA STOK MODIFIER:
+  trackStock         Boolean       @default(false) // Apakah opsi ini memotong stok?
+  inventoryProductId String?       // Opsional: Merujuk ke produk inventori fisik yang dipotong
+  inventoryProduct   Product?      @relation("InventoryProductModifier", fields: [inventoryProductId], references: [id], onDelete: SetNull)
+  deductQty          Float         @default(1)     // Berapa banyak qty stok yang dipotong per porsi
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([modifierGroupId])
+}
+
+model ProductModifierGroup {
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modifierGroupId String
+  modifierGroup   ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  @@id([productId, modifierGroupId])
+}
+
+model ProductUnit {
+  id             String  @id @default(uuid())
+  productId      String
+  product        Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name           String  // Contoh: "DUS", "RENCENG", "PCS"
+  conversionRate Int     @default(1) // 1 Dus = 24 Pcs (rate: 24)
+  price          Int     // Harga khusus jika beli satuan ini
+
+  @@index([productId])
+}
+
+model CashierShift {
+  id             String           @id @default(uuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId       String
+  branch         Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status         ShiftStatus      @default(OPEN)
+  openedAt       DateTime         @default(now())
+  closedAt       DateTime?
+
+  startingCash   Int              // Modal kas awal (Rp)
+  expectedCash   Int              @default(0) // Modal awal + Penjualan Tunai + Cash In - Cash Out
+  actualCash     Int?             // Uang fisik saat ditutup
+  cashDifference Int?             // Selisih (actual - expected)
+  notes          String?
+
+  movements      CashMovement[]
+  orders         Order[]
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([tenantId, branchId, status])
+}
+
+model CashMovement {
+  id        String           @id @default(uuid())
+  shiftId   String
+  shift     CashierShift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  type      CashMovementType
+  amount    Int              // Jumlah uang (Rp)
+  reason    String           // Keperluan (misal: "Beli Es Batu", "Tambah Pecahan Kecil")
+  createdAt DateTime         @default(now())
+
+  @@index([shiftId])
+}
+
+model Order {
+  id            String             @id @default(uuid())
+  orderNumber   String             @unique // Format: ORD-<SLUG>-<YYYYMMDD>-<4DIGIT>
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String
+  branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  cashierId     String
+  cashier       User               @relation(fields: [cashierId], references: [id], onDelete: Cascade)
+  shiftId       String?
+  shift         CashierShift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  orderType     OrderType          @default(DIRECT)
+  tableNumber   String?            // Khusus F&B
+  queueNumber   String?            // Nomor antrean
+  customerName  String?
+  customerId    String?
+  customer      Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  remainingDebt Int                @default(0) // Sisa piutang / kasbon yang belum lunas
+  dueDate       DateTime?          // Jatuh tempo pembayaran kasbon
+
+  status        OrderStatus        @default(COMPLETED)
+  paymentStatus PaymentStatusOrder @default(PAID)
+  paymentMethod PaymentMethod      @default(CASH)
+
+  subtotal      Int
+  discount      Int                @default(0)
+  tax           Int                @default(0)
+  totalAmount   Int
+  paidAmount    Int
+  changeAmount  Int                @default(0) // Uang kembalian
+
+  notes         String?
+  items         OrderItem[]
+
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([tenantId, branchId, createdAt])
+}
+
+model OrderItem {
+  id                 String              @id @default(uuid())
+  orderId            String
+  order              Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variantId          String?
+  unitId             String?
+
+  productName        String
+  variantName        String?
+  unitName           String?
+
+  unitPrice          Int
+  quantity           Float               @default(1)
+  subtotal           Int
+
+  selectedModifiers  OrderItemModifier[]
+
+  createdAt          DateTime            @default(now())
+
+  @@index([orderId])
+}
+
+model OrderItemModifier {
+  id                 String         @id @default(uuid())
+  orderItemId        String
+  orderItem          OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifierOptionId   String?
+  optionName         String
+  price              Int            @default(0)
+  deductQty          Float          @default(1)
+  inventoryProductId String?
+}
+
+model Supplier {
+  id          String          @id @default(uuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  notes       String?
+
+  purchaseOrders PurchaseOrder[]
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([tenantId])
+}
+
+model PurchaseOrder {
+  id          String              @id @default(uuid())
+  poNumber    String              @unique // Format: PO-<SLUG>-<YYYYMMDD>-<4DIGIT>
+  tenantId    String
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  supplierId  String
+  supplier    Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  userId      String              // Pembuat PO
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status      POStatus            @default(DRAFT)
+  orderDate   DateTime            @default(now())
+  receivedAt  DateTime?
+  totalAmount Int                 @default(0) // Total nilai belanja modal
+  notes       String?
+
+  items       PurchaseOrderItem[]
+
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([tenantId, branchId, status])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  productName     String
+  quantity        Float         @default(1)
+  costPrice       Int           // Harga modal beli satuan (Rp)
+  subtotal        Int           // quantity * costPrice
+
+  createdAt       DateTime      @default(now())
+
+  @@index([purchaseOrderId])
+}
+
+model StockOpname {
+  id           String             @id @default(uuid())
+  opnameNumber String             @unique // Format: OPN-<SLUG>-<YYYYMMDD>-<4DIGIT>
+  tenantId     String
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String
+  branch       Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  userId       String             // Petugas audit
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status       OpnameStatus       @default(DRAFT)
+  notes        String?
+  completedAt  DateTime?
+
+  items        StockOpnameItem[]
+
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([tenantId, branchId])
+}
+
+model StockOpnameItem {
+  id            String      @id @default(uuid())
+  stockOpnameId String
+  stockOpname   StockOpname @relation(fields: [stockOpnameId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  systemQty     Float       // Stok tercatat di sistem sebelum audit
+  physicalQty   Float       // Stok riil fisik yang dihitung
+  difference    Float       // physicalQty - systemQty
+  reason        String?     // Alasan selisih (rusak, hilang, basi, salah hitung)
+
+  createdAt     DateTime    @default(now())
+
+  @@index([stockOpnameId])
+}
+
+model ExpenseCategory {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String    // Misal: "Utilitas (Listrik & Air)", "Gaji & Upah", "Sewa Tempat", "Operasional Kebersihan"
+  isSystem  Boolean   @default(false)
+
+  expenses  Expense[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Expense {
+  id          String          @id @default(uuid())
+  expenseNo   String          @unique // Format: EXP-<SLUG>-<YYYYMMDD>-<4DIGIT>
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  userId      String          // Petugas/Admin pencatat
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount      Int             // Nominal biaya (Rp)
+  expenseDate DateTime        @default(now())
+  recipient   String?         // Penerima pembayaran (misal: "PLN", "Ibu Kos", "Nama Karyawan")
+  notes       String?
+  receiptUrl  String?         // URL bukti nota/struk pengeluaran (opsional)
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([tenantId, branchId, expenseDate])
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String?
+  email        String?
+  address      String?
+  notes        String?
+
+  totalOrders  Int           @default(0)
+  totalSpent   Int           @default(0)
+  totalDebt    Int           @default(0) // Total sisa kasbon/piutang yang belum dibayar
+
+  orders       Order[]
+  debtPayments DebtPayment[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([tenantId, phone])
+}
+
+model DebtPayment {
+  id            String        @id @default(uuid())
+  paymentNo     String        @unique // Format: PAY-DEBT-<TIMESTAMP>
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String
+  branch        Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cashierId     String
+  cashier       User          @relation(fields: [cashierId], references: [id], onDelete: Cascade)
+
+  amount        Int           // Jumlah bayar hutang (Rp)
+  paymentMethod PaymentMethod @default(CASH)
+  notes         String?
+
+  createdAt     DateTime      @default(now())
+
+  @@index([tenantId, customerId])
+}
+
+model StockTransfer {
+  id           String              @id @default(uuid())
+  transferNo   String              @unique // Format: TRF-<SLUG>-<YYYYMMDD>-<4DIGIT>
+  tenantId     String
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  fromBranchId String
+  fromBranch   Branch              @relation("TransferFrom", fields: [fromBranchId], references: [id], onDelete: Cascade)
+  toBranchId   String
+  toBranch     Branch              @relation("TransferTo", fields: [toBranchId], references: [id], onDelete: Cascade)
+
+  senderId     String
+  sender       User                @relation("TransferSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId   String?
+  receiver     User?               @relation("TransferReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
+
+  status       TransferStatus      @default(PENDING)
+  notes        String?
+
+  sentAt       DateTime            @default(now())
+  receivedAt   DateTime?
+  cancelledAt  DateTime?
+
+  items        StockTransferItem[]
+
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([tenantId, fromBranchId, toBranchId, status])
+}
+
+model StockTransferItem {
+  id          String        @id @default(uuid())
+  transferId  String
+  transfer    StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  productName String
+  quantity    Float         @default(1)
+
+  createdAt   DateTime      @default(now())
+
+  @@index([transferId])
+}
+
+model ReceiptSetting {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  paperSize        String   @default("58mm") // "58mm" | "80mm"
+  headerText       String?  // Teks tambahan di bawah nama toko
+  footerText       String?  // Contoh: "Terima kasih atas kunjungan Anda!"
+  showCashierName  Boolean  @default(true)
+  showCustomerName Boolean  @default(true)
+  showTableNumber  Boolean  @default(true)
+  showStoreLogo    Boolean  @default(false)
+  logoUrl          String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+
+
