@@ -205,15 +205,10 @@ export const login = async (req, res, next) => {
       });
     }
 
-    // 5. Aturan Akses Web vs Mobile (Paket FREE dibatasi hanya untuk Mobile POS)
-    if (clientType === 'web' && tenant.plan === 'FREE') {
-      return res.status(403).json({
-        success: false,
-        code: 'PLAN_RESTRICTED',
-        message:
-          'Paket FREE hanya dapat diakses melalui Aplikasi Mobile POS. Silakan upgrade ke paket PLUS untuk membuka akses Web Dashboard.',
-      });
-    }
+    // 5. Aturan Akses Web vs Mobile
+    // Catatan: Pengguna paket FREE diizinkan login ke Web Dashboard untuk mengakses
+    // menu Profil Toko (/dashboard/store-profile) dan Upgrade Paket (/dashboard/upgrade).
+    // Pembatasan fitur operasional (POS, Transaksi, dll) ditangani di tingkat Web Dashboard.
 
     // 6. Dapatkan Cabang Aktif User (utamakan cabang utama)
     const mainBranchEntry =
