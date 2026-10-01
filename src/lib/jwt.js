@@ -1,7 +1,16 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'omnipos-super-secret-jwt-key-default-dev';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d';
+
+// [C-2] Fatal startup validation — server tidak boleh berjalan tanpa JWT_SECRET yang kuat
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error(
+    '[FATAL] JWT_SECRET harus diset di environment dan minimal 32 karakter!\n' +
+    'Generate dengan perintah: openssl rand -hex 32\n' +
+    'Lalu tambahkan ke file .env: JWT_SECRET="hasil-generate-di-sini"'
+  );
+}
 
 /**
  * Generate JSON Web Token

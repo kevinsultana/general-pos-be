@@ -73,12 +73,35 @@ export const createOrder = async (req, res, next) => {
         select: { slug: true, name: true },
       });
 
-      // 3. Generate Order Number Unik: ORD-<SLUG>-<YYYYMMDD>-<4DIGIT>
+      // 3. Generate Order Number Unik: ORD-<SLUG>-<YYYYMMDD>-<4HEX> [L-1: pakai crypto.randomBytes agar tidak ada bias PRNG]
       const dateStr = getFormattedDateString();
-      const randomSuffix = crypto.randomInt(1000, 9999);
+      const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase(); // 4 hex chars (65536 kombinasi)
       const orderNumber = `ORD-${tenant?.slug?.toUpperCase() || 'POS'}-${dateStr}-${randomSuffix}`;
 
-      // 4. Proses Kalkulasi Harga Item & Validasi Produk
+      // 4. [C-4] Batch-fetch semua produk sebelum loop — menghilangkan N+1 query
+      const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))];
+      const productsInDb = await tx.product.findMany({
+        where: { id: { in: productIds }, tenantId },
+        include: {
+          variants: true,
+          unitPrices: true,
+        },
+      });
+      const productMap = new Map(productsInDb.map((p) => [p.id, p]));
+
+      // [C-3] Batch-fetch semua stok sekarang agar bisa cek floor di dalam transaksi
+      const modifierInventoryIds = items
+        .flatMap((item) => item.selectedModifiers || [])
+        .map((mod) => mod.inventoryProductId)
+        .filter(Boolean);
+      const allProductIdsForStock = [...new Set([...productIds, ...modifierInventoryIds])];
+      const stockRecords = await tx.productStock.findMany({
+        where: { productId: { in: allProductIdsForStock }, branchId },
+        select: { productId: true, quantity: true },
+      });
+      const stockMap = new Map(stockRecords.map((s) => [s.productId, s.quantity]));
+
+      // 4b. Proses Kalkulasi Harga Item & Validasi Produk
       let calculatedSubtotal = 0;
       const orderItemsData = [];
       const stockDeductions = []; // { productId, branchId, qty }
@@ -88,13 +111,7 @@ export const createOrder = async (req, res, next) => {
           throw new Error('Setiap item pesanan wajib menyertakan productId.');
         }
 
-        const product = await tx.product.findFirst({
-          where: { id: item.productId, tenantId },
-          include: {
-            variants: true,
-            unitPrices: true,
-          },
-        });
+        const product = productMap.get(item.productId);
 
         if (!product) {
           throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
@@ -161,7 +178,6 @@ export const createOrder = async (req, res, next) => {
             quantity: quantity,
           });
         }
-
         orderItemsData.push({
           productId: product.id,
           variantId: item.variantId || null,
@@ -258,25 +274,37 @@ export const createOrder = async (req, res, next) => {
         },
       });
 
-      // 7. Eksekusi Pengurangan Stok Otomatis pada ProductStock Cabang Aktif
-      for (const deduction of stockDeductions) {
-        await tx.productStock.upsert({
+      // 7. [C-3] Validasi ketersediaan stok SEBELUM eksekusi pengurangan
+      // Agregasi total deductions per produk agar satu produk yang muncul di banyak item dihitung sekali
+      const deductionTotals = new Map();
+      for (const d of stockDeductions) {
+        deductionTotals.set(d.productId, (deductionTotals.get(d.productId) || 0) + d.quantity);
+      }
+
+      for (const [productId, totalDeduction] of deductionTotals.entries()) {
+        const availableQty = stockMap.get(productId) ?? 0;
+        if (availableQty < totalDeduction) {
+          const productName = productMap.get(productId)?.name || productId;
+          throw new Error(
+            `STOCK_INSUFFICIENT: Stok produk "${productName}" tidak mencukupi. ` +
+            `Tersedia: ${availableQty}, dibutuhkan: ${totalDeduction}.`
+          );
+        }
+      }
+
+      // 7b. Eksekusi Pengurangan Stok Otomatis pada ProductStock Cabang Aktif
+      for (const [productId, totalDeduction] of deductionTotals.entries()) {
+        await tx.productStock.update({
           where: {
             productId_branchId: {
-              productId: deduction.productId,
+              productId,
               branchId,
             },
           },
-          update: {
+          data: {
             quantity: {
-              decrement: deduction.quantity,
+              decrement: totalDeduction,
             },
-          },
-          create: {
-            productId: deduction.productId,
-            branchId,
-            quantity: -deduction.quantity,
-            minStock: 5,
           },
         });
       }
@@ -309,6 +337,13 @@ export const createOrder = async (req, res, next) => {
         success: false,
         code: 'SHIFT_REQUIRED',
         message: error.message.replace('SHIFT_NOT_OPEN: ', ''),
+      });
+    }
+    if (error.message.startsWith('STOCK_INSUFFICIENT')) {
+      return res.status(422).json({
+        success: false,
+        code: 'STOCK_INSUFFICIENT',
+        message: error.message.replace('STOCK_INSUFFICIENT: ', ''),
       });
     }
     if (error.message.startsWith('Uang pembayaran kurang') || error.message.includes('wajib menyertakan')) {

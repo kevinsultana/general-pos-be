@@ -60,10 +60,10 @@ export const createOrderSchema = z.object({
   customerId: z.string().uuid('customerId harus berupa UUID valid.').optional().nullable(),
 
   paymentMethod: z
-    .enum(['CASH', 'QRIS', 'TRANSFER', 'DEBIT', 'CREDIT_CARD', 'MIDTRANS'], {
+    .enum(['CASH', 'QRIS', 'TRANSFER', 'DEBIT'], {
       errorMap: () => ({
         message:
-          'paymentMethod tidak valid. Pilihan: CASH, QRIS, TRANSFER, DEBIT, CREDIT_CARD, MIDTRANS.',
+          'paymentMethod tidak valid. Pilihan yang tersedia: CASH, QRIS, TRANSFER, DEBIT.',
       }),
     })
     .optional()

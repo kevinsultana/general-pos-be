@@ -246,12 +246,15 @@ model Category {
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name      String
   color     String?   // Kode warna hex (misal: "#f59e0b") untuk kartu kasir
+  deletedAt DateTime? // [L-5] Soft delete — null = aktif, non-null = dihapus
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
   products  Product[]
 
   @@index([tenantId])
+  @@index([tenantId, deletedAt]) // [L-5] Query efisien untuk filter soft delete
 }
 
 model Product {
@@ -273,6 +276,8 @@ model Product {
   isService   Boolean   @default(false) // Jika true, abaikan perhitungan stok fisik
   trackStock  Boolean   @default(true)  // Apakah item ini melacak jumlah stok fisik
 
+  deletedAt   DateTime? // [L-5] Soft delete — null = aktif, non-null = dihapus
+
   // Relasi modular
   variants        ProductVariant[]
   stocks          ProductStock[]
@@ -290,6 +295,7 @@ model Product {
   updatedAt   DateTime  @updatedAt
 
   @@index([tenantId])
+  @@index([tenantId, deletedAt]) // [L-5] Query efisien untuk filter soft delete
   @@index([barcode])
   @@index([sku])
 }
@@ -311,6 +317,7 @@ model ProductStock {
 
   @@unique([productId, branchId])
   @@index([branchId])
+  @@index([branchId, productId]) // [H-6] Composite index untuk lookup stok per cabang
 }
 
 model ProductVariant {
@@ -407,6 +414,7 @@ model CashierShift {
   updatedAt      DateTime         @updatedAt
 
   @@index([tenantId, branchId, status])
+  @@index([tenantId, branchId, userId, status]) // [H-6] Composite index untuk query shift kasir aktif per user
 }
 
 model CashMovement {

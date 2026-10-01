@@ -28,8 +28,18 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Izinkan permintaan tanpa origin (seperti mobile app, curl, server-to-server)
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Izinkan permintaan tanpa origin (mobile app, server-to-server, Postman)
+      // [M-5] Di production, log request tanpa origin untuk audit
+      if (!origin) {
+        if (process.env.NODE_ENV === 'production') {
+          console.warn('[CORS] Request tanpa Origin header diterima:', {
+            timestamp: new Date().toISOString(),
+            path: 'N/A (log dari CORS handler)',
+          });
+        }
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
       return callback(new Error('Akses diblokir oleh kebijakan keamanan CORS.'));
@@ -38,9 +48,9 @@ app.use(
   })
 );
 
-// 3. Parser Payload Request
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 3. Parser Payload Request — [H-2] Batasi ukuran body maksimal 1MB untuk mencegah payload flooding
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 4. Swagger UI Documentation
 setupSwagger(app);

@@ -2,19 +2,53 @@
  * Global Centralized Error Handler Middleware
  * Menangani error di seluruh middleware/controller secara terpusat, aman, dan konsisten.
  * Mencegah kebocoran stack trace dan detail internal sensitif ke pengguna.
+ *
+ * [M-3] Tambahan: Handle Prisma error codes (P2002, P2025) secara eksplisit.
  */
 export const errorHandler = (err, req, res, next) => {
-  const statusCode = err.statusCode || err.status || 500;
   const isDevelopment = process.env.NODE_ENV === 'development';
 
   // Log error di internal server console untuk keperluan debugging developer/sysadmin
   console.error('[Internal Error Handler]', {
     method: req.method,
     url: req.originalUrl,
-    statusCode,
     message: err.message,
-    stack: err.stack,
+    code: err.code,
+    stack: isDevelopment ? err.stack : undefined,
   });
+
+  // [M-3] Prisma Known Error — P2002: Unique constraint violation (Duplicate Entry)
+  if (err.code === 'P2002') {
+    const fields = err.meta?.target || [];
+    return res.status(409).json({
+      success: false,
+      code: 'DUPLICATE_ENTRY',
+      message: `Data sudah ada: ${fields.join(', ')} harus unik.`,
+      ...(isDevelopment && { stack: err.stack }),
+    });
+  }
+
+  // [M-3] Prisma Known Error — P2025: Record not found
+  if (err.code === 'P2025') {
+    return res.status(404).json({
+      success: false,
+      code: 'NOT_FOUND',
+      message: err.meta?.cause || 'Data yang diminta tidak ditemukan.',
+      ...(isDevelopment && { stack: err.stack }),
+    });
+  }
+
+  // [M-3] Prisma Known Error — P2003: Foreign key constraint failed
+  if (err.code === 'P2003') {
+    return res.status(400).json({
+      success: false,
+      code: 'FOREIGN_KEY_CONSTRAINT',
+      message: 'Operasi gagal: data terkait tidak ditemukan atau masih digunakan.',
+      ...(isDevelopment && { stack: err.stack }),
+    });
+  }
+
+  const statusCode = err.statusCode || err.status || 500;
 
   // 1. Penanganan khusus jika error bertipe 403 Forbidden (RBAC / Plan Restricted / Permission Denied)
   if (statusCode === 403) {

@@ -92,8 +92,21 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    // Tentukan activeBranchId dari payload token yang sudah terverifikasi
-    const activeBranchId = decoded.activeBranchId || null;
+    // [H-1 / L-3] Validasi activeBranchId terhadap database:
+    // Pastikan branch ada, aktif, dan benar-benar milik tenant yang sama
+    let activeBranchId = decoded.activeBranchId || null;
+
+    if (activeBranchId) {
+      const branch = await prisma.branch.findUnique({
+        where: { id: activeBranchId },
+        select: { id: true, tenantId: true, isActive: true },
+      });
+
+      if (!branch || branch.tenantId !== user.tenantId || !branch.isActive) {
+        // Branch tidak valid: reset ke null — controller yang butuh branchId akan handle sendiri
+        activeBranchId = null;
+      }
+    }
 
     // Sematkan informasi penting ke objek request
     req.user = user;
