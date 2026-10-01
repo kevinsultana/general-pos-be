@@ -1,3 +1,0 @@
--- AlterEnum
-ALTER TYPE "OrderType" ADD VALUE 'DELIVERY';
-ALTER TYPE "OrderType" ADD VALUE 'ONLINE';
