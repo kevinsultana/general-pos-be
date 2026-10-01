@@ -1,30 +1,30 @@
 import crypto from 'crypto';
 import prisma from '../lib/prisma.js';
-import { snap } from '../lib/midtrans.js';
+import { snap } from '../services/midtrans.service.js';
 import { generateToken } from '../lib/jwt.js';
 
-// Struktur Harga Langganan OmniPOS (dalam Rupiah)
+// Struktur Harga Resmi Langganan OmniPOS
 const PLAN_PRICING = {
   PLUS: {
     monthly: 25000,
-    yearly: 240000, // Rp 20.000 x 12 bulan
+    yearly: 240000, // Rp 20.000 / bln x 12
   },
   PRO: {
     monthly: 60000,
-    yearly: 600000, // Rp 50.000 x 12 bulan
+    yearly: 600000, // Rp 50.000 / bln x 12
   },
 };
 
 /**
- * Controller: Membuat Transaksi Pembayaran Midtrans Snap
- * POST /api/subscriptions/create-transaction (Protected)
+ * Controller: Membuat Transaksi Pembayaran Midtrans Snap Resmi
+ * POST /api/subscriptions/create-transaction (Protected: requireAuth)
  */
-export const createTransaction = async (req, res, next) => {
+export const createTransaction = async (req, res) => {
   try {
     const { plan, billingCycle = 'yearly' } = req.body;
     const { tenant, user } = req;
 
-    // 1. Validasi Input
+    // 1. Validasi Input Plan & Billing Cycle
     if (!plan || !['PLUS', 'PRO'].includes(plan.toUpperCase())) {
       return res.status(400).json({
         success: false,
@@ -34,29 +34,29 @@ export const createTransaction = async (req, res, next) => {
 
     const normalizedPlan = plan.toUpperCase();
     const cycle = billingCycle === 'monthly' ? 'monthly' : 'yearly';
-    const amount = PLAN_PRICING[normalizedPlan][cycle];
+    const grossAmount = PLAN_PRICING[normalizedPlan][cycle];
 
-    // 2. Generate Order ID Unik
-    const tenantSlug = tenant?.slug ? tenant.slug.toUpperCase() : 'STORE';
-    const orderId = `SUB-${tenantSlug}-${Date.now()}`;
+    // 2. Buat Order ID Unik (maksimal 50 karakter sesuai spesifikasi Midtrans)
+    // Format: SUB-<tenantId_16char>-<unixTimestamp>
+    const tenantShortId = (tenant.id || '').replace(/-/g, '').slice(0, 16);
+    const orderId = `SUB-${tenantShortId}-${Math.floor(Date.now() / 1000)}`;
 
-    // 3. Siapkan Parameter Midtrans Snap
+    // 3. Siapkan Parameter Transaksi Midtrans Snap
     const parameter = {
       transaction_details: {
         order_id: orderId,
-        gross_amount: amount,
+        gross_amount: Math.round(grossAmount),
       },
       customer_details: {
-        first_name: user.name || 'Pemilik Toko',
+        first_name: user.name || tenant.name || 'Pelanggan',
         email: user.email,
-        phone: '08123456789',
       },
       item_details: [
         {
-          id: `PLAN-${normalizedPlan}-${cycle.toUpperCase()}`,
-          price: amount,
+          id: `${normalizedPlan}-${cycle}`,
+          price: Math.round(grossAmount),
           quantity: 1,
-          name: `OmniPOS ${normalizedPlan} (${cycle === 'yearly' ? '1 Tahun' : '1 Bulan'})`,
+          name: `Paket ${normalizedPlan} (${cycle === 'yearly' ? 'Tahunan' : 'Bulanan'})`,
         },
       ],
       callbacks: {
@@ -64,219 +64,189 @@ export const createTransaction = async (req, res, next) => {
       },
     };
 
-    let snapToken = null;
-    let redirectUrl = null;
-    let isMockSimulation = false;
+    // 4. Panggil SDK resmi Midtrans Snap (Tanpa dummy/simulasi token)
+    const transaction = await snap.createTransaction(parameter);
 
-    // 4. Panggil snap.createTransaction()
-    try {
-      const transaction = await snap.createTransaction(parameter);
-      if (transaction && transaction.token) {
-        snapToken = transaction.token;
-        redirectUrl = transaction.redirect_url;
-      }
-    } catch (midtransErr) {
-      console.warn('Peringatan Midtrans Snap API:', midtransErr.message);
-
-      // Tangani penolakan kunci Midtrans secara transparan
-      const errMsg = midtransErr.message || '';
-      const isUnauthorized = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('Access denied');
-
-      // Jika kunci ditolak oleh Midtrans (401), jangan kirim token palsu ke window.snap.pay
-      // melainkan tandai sebagai simulasi mode pengujian
-      isMockSimulation = true;
-      snapToken = `SIM-${normalizedPlan}-${Date.now()}`;
-
-      // Simpan record PENDING untuk tracking simulasi
-      await prisma.subscriptionPayment.create({
-        data: {
-          orderId,
-          tenantId: tenant.id,
-          plan: normalizedPlan,
-          billingCycle: cycle,
-          amount,
-          status: 'PENDING',
-          snapToken,
-          snapRedirectUrl: null,
-        },
-      });
-
-      return res.status(200).json({
-        success: true,
-        isMock: true,
-        mockReason: isUnauthorized
-          ? 'Kunci Midtrans ditolak (401 Unauthorized). Akun Production mungkin belum aktif atau perlu menggunakan kunci Sandbox (SB-Mid-).'
-          : errMsg,
-        token: snapToken,
-        orderId,
-      });
+    if (!transaction || !transaction.token) {
+      throw new Error('Midtrans Snap tidak mengembalikan token transaksi yang valid.');
     }
 
-    // 5. Simpan Record ke Database dengan Status PENDING
+    // 5. Simpan Catatan Pembayaran ke Database PostgreSQL dengan Status PENDING
     await prisma.subscriptionPayment.create({
       data: {
         orderId,
         tenantId: tenant.id,
         plan: normalizedPlan,
         billingCycle: cycle,
-        amount,
+        amount: Math.round(grossAmount),
         status: 'PENDING',
-        snapToken,
-        snapRedirectUrl: redirectUrl,
+        snapToken: transaction.token,
+        snapRedirectUrl: transaction.redirect_url,
       },
     });
 
-    // 6. Kembalikan Response Sukses Midtrans
+    // 6. Kembalikan Response Sukses ke Frontend
     return res.status(200).json({
       success: true,
-      token: snapToken,
-      redirect_url: redirectUrl,
-      orderId,
+      data: {
+        snapToken: transaction.token,
+        token: transaction.token,
+        redirectUrl: transaction.redirect_url,
+        orderId,
+      },
     });
   } catch (error) {
-    next(error);
+    console.error('[Subscription] Error creating transaction:', error);
+
+    // Tangkap error asli dari Midtrans API agar mudah didiagnosis
+    const midtransError = error.ApiResponse || error.message || error;
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Gagal memproses transaksi Midtrans Snap.',
+      errorDetail: midtransError,
+    });
   }
 };
 
 /**
- * Controller: Verifikasi Transaksi & Perbarui Paket Toko
- * POST /api/subscriptions/verify (Protected)
+ * Controller: Verifikasi Pembayaran Transaksi Midtrans
+ * POST /api/subscriptions/verify-payment & POST /api/subscriptions/verify (Protected: requireAuth)
  */
-export const verifyPayment = async (req, res, next) => {
+export const verifyPayment = async (req, res) => {
   try {
-    const { orderId, plan: fallbackPlan } = req.body;
+    const { orderId, plan } = req.body;
     const { tenant, user, activeBranchId } = req;
 
-    // 1. Cari riwayat pembayaran di database
-    let payment = null;
-    if (orderId) {
-      payment = await prisma.subscriptionPayment.findUnique({
-        where: { orderId },
-        include: { tenant: true },
-      });
-    }
-
-    // Jika orderId tidak ditemukan atau dalam mode simulasi cepat, buat fallback record
-    if (!payment) {
-      const targetPlan = (fallbackPlan || 'PLUS').toUpperCase();
-      const cycle = 'yearly';
-      const amount = PLAN_PRICING[targetPlan]?.[cycle] || 240000;
-      const simOrderId = orderId || `SUB-${tenant?.slug?.toUpperCase() || 'STORE'}-${Date.now()}`;
-
-      payment = await prisma.subscriptionPayment.create({
-        data: {
-          orderId: simOrderId,
-          tenantId: tenant.id,
-          plan: targetPlan,
-          billingCycle: cycle,
-          amount,
-          status: 'SETTLEMENT',
-          paidAt: new Date(),
-          paymentType: 'qris',
-        },
-        include: { tenant: true },
-      });
-    }
-
-    // 2. Ambil status dari Midtrans jika memungkinkan
-    let midtransStatus = null;
-    let isSuccess = false;
-
-    try {
-      midtransStatus = await snap.transaction.status(payment.orderId);
-      if (
-        midtransStatus &&
-        (midtransStatus.transaction_status === 'settlement' ||
-          midtransStatus.transaction_status === 'capture')
-      ) {
-        isSuccess = true;
-      }
-    } catch (err) {
-      // Jika status lookup tidak tersedia (misal token simulasi lokal), anggap terverifikasi
-      isSuccess = true;
-    }
-
-    if (!isSuccess && midtransStatus) {
+    if (!orderId) {
       return res.status(400).json({
         success: false,
-        message: `Status pembayaran saat ini: ${midtransStatus.transaction_status}`,
+        message: 'Parameter orderId wajib disertakan.',
       });
     }
 
-    // 3. Hitung Masa Aktif Langganan
-    const expiryDays = payment.billingCycle === 'yearly' ? 365 : 30;
-    const calculatedExpiryDate = new Date();
-    calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + expiryDays);
+    // 1. Cek Status Transaksi Langsung ke Midtrans API
+    const statusResponse = await snap.transaction.status(orderId);
+    const { transaction_status, fraud_status, payment_type } = statusResponse;
 
-    // 4. Update Database secara Atomic Transaction
-    const [updatedPayment, updatedTenant] = await prisma.$transaction([
-      prisma.subscriptionPayment.update({
-        where: { id: payment.id },
+    // 2. Evaluasi Status Pembayaran
+    const isSettled =
+      transaction_status === 'settlement' ||
+      (transaction_status === 'capture' && fraud_status === 'accept');
+
+    if (isSettled) {
+      // Cari record pembayaran untuk mengetahui plan dan billingCycle
+      const payment = await prisma.subscriptionPayment.findUnique({
+        where: { orderId },
+      });
+
+      const targetPlan = (plan || payment?.plan || 'PLUS').toUpperCase();
+      const cycle = payment?.billingCycle || 'yearly';
+
+      // Hitung masa aktif langganan: jika monthly (+30 hari), jika yearly (+365 hari)
+      const expiryDays = cycle === 'yearly' ? 365 : 30;
+      const calculatedExpiryDate = new Date();
+      calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + expiryDays);
+
+      // Update Database secara Atomic Transaction
+      const [updatedPayment, updatedTenant] = await prisma.$transaction([
+        prisma.subscriptionPayment.upsert({
+          where: { orderId },
+          update: {
+            status: 'SETTLEMENT',
+            paidAt: new Date(),
+            paymentType: payment_type || 'midtrans',
+            rawResponse: statusResponse,
+          },
+          create: {
+            orderId,
+            tenantId: tenant.id,
+            plan: targetPlan,
+            billingCycle: cycle,
+            amount: Math.round(statusResponse.gross_amount || 0),
+            status: 'SETTLEMENT',
+            paidAt: new Date(),
+            paymentType: payment_type || 'midtrans',
+            rawResponse: statusResponse,
+          },
+        }),
+        prisma.tenant.update({
+          where: { id: tenant.id },
+          data: {
+            plan: targetPlan,
+            planStatus: 'ACTIVE',
+            billingCycle: cycle,
+            subscriptionExpiresAt: calculatedExpiryDate,
+          },
+        }),
+      ]);
+
+      // Generate JWT Token baru dengan plan yang terupdate
+      const newToken = generateToken({
+        userId: user.id,
+        tenantId: updatedTenant.id,
+        tenantSlug: updatedTenant.slug,
+        role: user.role?.name || (user.isOwner ? 'OWNER' : 'KASIR'),
+        activeBranchId: activeBranchId || null,
+        plan: updatedTenant.plan,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Pembayaran berhasil diverifikasi dan paket langganan telah aktif.',
         data: {
-          status: 'SETTLEMENT',
-          paidAt: new Date(),
-          paymentType: midtransStatus?.payment_type || payment.paymentType || 'qris',
-          rawResponse: midtransStatus || {},
+          token: newToken,
+          tenant: {
+            id: updatedTenant.id,
+            name: updatedTenant.name,
+            slug: updatedTenant.slug,
+            plan: updatedTenant.plan,
+            planStatus: updatedTenant.planStatus,
+            billingCycle: updatedTenant.billingCycle,
+            subscriptionExpiresAt: updatedTenant.subscriptionExpiresAt,
+          },
+          payment: {
+            orderId: updatedPayment.orderId,
+            status: updatedPayment.status,
+            amount: updatedPayment.amount,
+            paidAt: updatedPayment.paidAt,
+          },
         },
-      }),
-      prisma.tenant.update({
-        where: { id: tenant.id },
-        data: {
-          plan: payment.plan,
-          planStatus: 'ACTIVE',
-          billingCycle: payment.billingCycle,
-          subscriptionExpiresAt: calculatedExpiryDate,
-        },
-      }),
-    ]);
+      });
+    }
 
-    // 5. Generate JWT Token Baru dengan Plan Terupdate
-    const newToken = generateToken({
-      userId: user.id,
-      tenantId: updatedTenant.id,
-      tenantSlug: updatedTenant.slug,
-      role: user.role?.name || (user.isOwner ? 'OWNER' : 'KASIR'),
-      activeBranchId: activeBranchId || null,
-      plan: updatedTenant.plan,
-    });
+    // Jika status masih pending
+    if (transaction_status === 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Pembayaran belum diselesaikan. Silakan selesaikan pembayaran Anda di gerbang Midtrans.',
+        status: transaction_status,
+      });
+    }
 
-    return res.status(200).json({
-      success: true,
-      message: 'Pembayaran berhasil diverifikasi dan paket langganan aktif.',
-      data: {
-        token: newToken,
-        tenant: {
-          id: updatedTenant.id,
-          name: updatedTenant.name,
-          slug: updatedTenant.slug,
-          plan: updatedTenant.plan,
-          planStatus: updatedTenant.planStatus,
-          billingCycle: updatedTenant.billingCycle,
-          subscriptionExpiresAt: updatedTenant.subscriptionExpiresAt,
-        },
-        payment: {
-          id: updatedPayment.id,
-          orderId: updatedPayment.orderId,
-          plan: updatedPayment.plan,
-          amount: updatedPayment.amount,
-          status: updatedPayment.status,
-          paidAt: updatedPayment.paidAt,
-        },
-      },
+    // Status lainnya (expire, cancel, deny, failure)
+    return res.status(400).json({
+      success: false,
+      message: `Status transaksi saat ini: ${transaction_status}. Pembayaran tidak berhasil.`,
+      status: transaction_status,
     });
   } catch (error) {
-    next(error);
+    console.error('[Subscription] Error verifying payment:', error);
+    const midtransError = error.ApiResponse || error.message || error;
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Gagal memverifikasi status pembayaran ke Midtrans.',
+      errorDetail: midtransError,
+    });
   }
 };
 
 /**
  * Controller: Handler HTTP Webhook Midtrans
- * POST /api/subscriptions/webhook (Public)
+ * POST /api/subscriptions/webhook (Public Route)
  */
-export const handleWebhook = async (req, res, next) => {
+export const handleWebhook = async (req, res) => {
   try {
     const notification = req.body;
-
     const {
       order_id,
       status_code,
@@ -294,8 +264,8 @@ export const handleWebhook = async (req, res, next) => {
       });
     }
 
-    // 1. Verifikasi Signature Key SHA512
-    const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-xxxxxxx';
+    // Verifikasi Signature Key SHA512
+    const serverKey = (process.env.MIDTRANS_SERVER_KEY || '').trim();
     const rawSignaturePayload = `${order_id}${status_code}${gross_amount}${serverKey}`;
     const expectedSignature = crypto
       .createHash('sha512')
@@ -313,7 +283,7 @@ export const handleWebhook = async (req, res, next) => {
       });
     }
 
-    // 2. Cari Data Pembayaran
+    // Cari Data Pembayaran
     const payment = await prisma.subscriptionPayment.findUnique({
       where: { orderId: order_id },
       include: { tenant: true },
@@ -326,24 +296,18 @@ export const handleWebhook = async (req, res, next) => {
       });
     }
 
-    // 3. Proses Transisi Status Midtrans
     let paymentStatus = payment.status;
     let shouldActivatePlan = false;
 
     if (transaction_status === 'capture') {
-      if (fraud_status === 'challenge') {
-        paymentStatus = 'PENDING';
-      } else if (fraud_status === 'accept') {
+      if (fraud_status === 'accept' || !fraud_status) {
         paymentStatus = 'SETTLEMENT';
         shouldActivatePlan = true;
       }
     } else if (transaction_status === 'settlement') {
       paymentStatus = 'SETTLEMENT';
       shouldActivatePlan = true;
-    } else if (
-      transaction_status === 'cancel' ||
-      transaction_status === 'deny'
-    ) {
+    } else if (transaction_status === 'cancel' || transaction_status === 'deny') {
       paymentStatus = 'CANCEL';
     } else if (transaction_status === 'expire') {
       paymentStatus = 'EXPIRE';
@@ -351,7 +315,6 @@ export const handleWebhook = async (req, res, next) => {
       paymentStatus = 'PENDING';
     }
 
-    // 4. Update Database
     if (shouldActivatePlan) {
       const expiryDays = payment.billingCycle === 'yearly' ? 365 : 30;
       const calculatedExpiryDate = new Date();
@@ -393,15 +356,19 @@ export const handleWebhook = async (req, res, next) => {
       message: 'Webhook Midtrans berhasil diproses.',
     });
   } catch (error) {
-    next(error);
+    console.error('[Subscription] Error handling webhook:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal memproses webhook Midtrans.',
+    });
   }
 };
 
 /**
  * Controller: Mendapatkan Informasi Langganan Aktif Toko
- * GET /api/subscriptions/status (Protected)
+ * GET /api/subscriptions/status (Protected: requireAuth)
  */
-export const getSubscriptionStatus = async (req, res, next) => {
+export const getSubscriptionStatus = async (req, res) => {
   try {
     const { tenant } = req;
 
@@ -435,7 +402,11 @@ export const getSubscriptionStatus = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    console.error('[Subscription] Error getting subscription status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal mendapatkan status langganan.',
+    });
   }
 };
 
