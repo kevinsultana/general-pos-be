@@ -7,7 +7,8 @@ const options = {
     info: {
       title: 'POS SaaS Multi-Tenant API',
       version: '1.0.0',
-      description: 'Dokumentasi RESTful API untuk platform SaaS Point of Sale (POS) Multi-Tenant berbasis Express.js dan Prisma ORM.',
+      description:
+        'Dokumentasi RESTful API untuk platform SaaS Point of Sale (POS) Multi-Tenant berbasis Express.js dan Prisma ORM.',
     },
     servers: [
       {
@@ -15,6 +16,16 @@ const options = {
         description: 'Development Server',
       },
     ],
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Masukkan JWT token dalam format: Bearer <token>',
+        },
+      },
+    },
   },
   apis: ['./src/routes/**/*.js'],
 };
