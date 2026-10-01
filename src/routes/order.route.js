@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { createOrderSchema } from '../validations/order.validation.js';
 import {
   createOrder,
   getOrders,
@@ -121,7 +123,7 @@ const router = Router();
  *       200:
  *         description: Berhasil memuat riwayat transaksi
  */
-router.post('/', authenticate, requirePermission('pos:access'), createOrder);
+router.post('/', authenticate, requirePermission('pos:access'), validate(createOrderSchema), createOrder);
 router.get('/', authenticate, requirePermission('reports:view'), getOrders);
 
 /**

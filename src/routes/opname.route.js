@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { createOpnameSchema } from '../validations/opname.validation.js';
 import {
   getOpnames,
   createOpname,
@@ -57,6 +59,6 @@ const router = Router();
  *         description: Stok opname selesai dan stok berhasil disesuaikan
  */
 router.get('/', authenticate, requirePermission('inventory:view'), getOpnames);
-router.post('/', authenticate, requirePermission('inventory:manage'), createOpname);
+router.post('/', authenticate, requirePermission('inventory:manage'), validate(createOpnameSchema), createOpname);
 
 export default router;

@@ -39,6 +39,7 @@ router.use('/orders', orderRoute);
 router.use('/suppliers', supplierRoute);
 router.use('/purchase-orders', purchaseOrderRoute);
 router.use('/opnames', opnameRoute);
+router.use('/inventory/opname', opnameRoute);
 router.use('/expenses', expenseRoute);
 router.use('/reports', reportRoute);
 router.use('/business-config', businessConfigRoute);

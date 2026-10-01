@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePlan, requirePermission } from '../middlewares/rbac.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { createTransferSchema } from '../validations/transfer.validation.js';
 import {
   getTransfers,
   createTransfer,
@@ -89,6 +91,7 @@ router.post(
   authenticate,
   requirePlan('PRO'),
   requirePermission('inventory:manage'),
+  validate(createTransferSchema),
   createTransfer
 );
 
