@@ -74,6 +74,9 @@ model Branch {
   tenantId     String
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String       // Default: "Cabang Utama"
+  address      String?
+  phone        String?
+  isActive     Boolean      @default(true)
   isMain       Boolean      @default(true)
 
   userBranches UserBranch[]
@@ -88,7 +91,9 @@ model Role {
   id          String   @id @default(uuid())
   tenantId    String
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String   // OWNER, KASIR, ADMIN
+  name        String   // OWNER, KASIR, ADMIN, MANAGER
+  description String?
+  isSystem    Boolean  @default(false)
   permissions Json     // Format array string, misal: ["*"]
 
   users       User[]
@@ -101,22 +106,25 @@ model Role {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  tenantId     String
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  roleId       String?
-  role         Role?        @relation(fields: [roleId], references: [id])
+  id                String       @id @default(uuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roleId            String?
+  role              Role?        @relation(fields: [roleId], references: [id])
 
-  name         String
-  email        String
-  password     String
-  isOwner      Boolean      @default(false)
-  isActive     Boolean      @default(true)
+  name              String
+  email             String
+  password          String
+  phone             String?
+  pin               String?
+  isOwner           Boolean      @default(false)
+  isActive          Boolean      @default(true)
+  allBranchesAccess Boolean      @default(false)
 
-  userBranches UserBranch[]
+  userBranches      UserBranch[]
 
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -128,6 +136,7 @@ model UserBranch {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   branchId  String
   branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  isDefault Boolean  @default(false)
 
   @@unique([userId, branchId])
 }

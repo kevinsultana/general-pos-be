@@ -76,12 +76,34 @@ export const register = async (req, res, next) => {
         },
       });
 
-      // 4c. Buat default Role ("OWNER", permissions: ["*"])
-      const role = await tx.role.create({
+      // 4c. Buat 3 default Roles sekaligus: OWNER, MANAGER, KASIR
+      const ownerRole = await tx.role.create({
         data: {
           tenantId: tenant.id,
           name: 'OWNER',
+          description: 'Pemilik Toko dengan akses penuh tanpa batas ke seluruh sistem',
           permissions: ['*'],
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'MANAGER',
+          description: 'Supervisor operasional toko, inventori, laporan, dan staf',
+          permissions: ['pos:*', 'inventory:*', 'reports:*', 'users:view'],
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'KASIR',
+          description: 'Staf kasir untuk transaksi penjualan dan kelola shift POS',
+          permissions: ['pos:access', 'pos:shift'],
+          isSystem: true,
         },
       });
 
@@ -89,7 +111,7 @@ export const register = async (req, res, next) => {
       const user = await tx.user.create({
         data: {
           tenantId: tenant.id,
-          roleId: role.id,
+          roleId: ownerRole.id,
           name: ownerName.trim(),
           email: normalizedEmail,
           password: hashedPassword,
