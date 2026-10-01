@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { requirePermission } from '../middlewares/rbac.middleware.js';
 import {
   createTransaction,
   verifyPayment,
@@ -64,7 +65,12 @@ const router = Router();
  *       401:
  *         description: Tidak terautentikasi
  */
-router.post('/create-transaction', authenticate, createTransaction);
+router.post(
+  '/create-transaction',
+  authenticate,
+  requirePermission('subscriptions:manage'),
+  createTransaction
+);
 
 /**
  * @openapi
@@ -212,6 +218,11 @@ router.post('/webhook', handleWebhook);
  *       401:
  *         description: Tidak terautentikasi
  */
-router.get('/status', authenticate, getSubscriptionStatus);
+router.get(
+  '/status',
+  authenticate,
+  requirePermission('subscriptions:view'),
+  getSubscriptionStatus
+);
 
 export default router;

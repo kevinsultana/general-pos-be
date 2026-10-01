@@ -4,6 +4,7 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  getMasterPermissions,
 } from '../controllers/role.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePlan, requirePermission } from '../middlewares/rbac.middleware.js';
@@ -12,10 +13,35 @@ const router = Router();
 
 /**
  * @openapi
+ * /api/roles/permissions:
+ *   get:
+ *     summary: Mendapatkan daftar seluruh master permissions sistem secara terkelompok
+ *     description: Mengambil seluruh daftar hak akses sistem (RBAC) yang terbagi dalam kategori panel untuk antarmuka checklist izin.
+ *     tags:
+ *       - Roles & Permissions
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Berhasil memuat master permissions
+ *       401:
+ *         description: Otentikasi diperlukan
+ *       403:
+ *         description: Memerlukan paket PLUS / PRO
+ */
+router.get(
+  '/permissions',
+  authenticate,
+  requirePlan('PLUS'),
+  getMasterPermissions
+);
+
+/**
+ * @openapi
  * /api/roles:
  *   get:
  *     summary: Mendapatkan daftar semua peran (roles) toko
- *     description: Mengambil seluruh peran yang ada pada tenant aktif beserta jumlah staf yang menggunakannya. Membutuhkan paket PLUS/PRO dan permission users:view.
+ *     description: Mengambil seluruh peran yang ada pada tenant aktif beserta jumlah staf yang menggunakannya. Membutuhkan paket PLUS/PRO dan permission roles:view.
  *     tags:
  *       - Roles & Permissions
  *     security:
@@ -63,7 +89,7 @@ router.get(
   '/',
   authenticate,
   requirePlan('PLUS'),
-  requirePermission('users:view'),
+  requirePermission('roles:view'),
   getRoles
 );
 
@@ -71,7 +97,7 @@ router.post(
   '/',
   authenticate,
   requirePlan('PLUS'),
-  requirePermission('users:manage'),
+  requirePermission('roles:manage'),
   createRole
 );
 
@@ -137,7 +163,7 @@ router.put(
   '/:id',
   authenticate,
   requirePlan('PLUS'),
-  requirePermission('users:manage'),
+  requirePermission('roles:manage'),
   updateRole
 );
 
@@ -145,7 +171,7 @@ router.delete(
   '/:id',
   authenticate,
   requirePlan('PLUS'),
-  requirePermission('users:manage'),
+  requirePermission('roles:manage'),
   deleteRole
 );
 

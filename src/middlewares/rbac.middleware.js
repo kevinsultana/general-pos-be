@@ -6,7 +6,7 @@ export const requirePlan = (minPlan) => {
   return (req, res, next) => {
     const tenantPlan = req.tenant?.plan || 'FREE';
 
-    // Rencana tier: FREE < PLUS < PRO
+    // Rencana hierarki tier: FREE (1) < PLUS (2) < PRO (3)
     const planHierarchy = {
       FREE: 1,
       PLUS: 2,
@@ -20,8 +20,8 @@ export const requirePlan = (minPlan) => {
       return res.status(403).json({
         success: false,
         code: 'PLAN_RESTRICTED',
-        message:
-          'Fitur multi-user dan kelola staf hanya tersedia untuk paket PLUS dan PRO.',
+        message: 'Fitur ini memerlukan paket langganan yang lebih tinggi.',
+        minPlan,
       });
     }
 
@@ -40,6 +40,7 @@ export const requirePermission = (permissionKey) => {
     if (!user) {
       return res.status(401).json({
         success: false,
+        code: 'UNAUTHORIZED',
         message: 'Otentikasi diperlukan.',
       });
     }
@@ -55,7 +56,9 @@ export const requirePermission = (permissionKey) => {
     if (!permissions) {
       return res.status(403).json({
         success: false,
-        message: 'Anda tidak memiliki izin akses untuk tindakan ini.',
+        code: 'PERMISSION_DENIED',
+        message: 'Akses ditolak: Akun Anda tidak memiliki izin untuk melakukan tindakan ini.',
+        requiredPermission: permissionKey,
       });
     }
 
@@ -71,7 +74,9 @@ export const requirePermission = (permissionKey) => {
     if (!Array.isArray(permissions)) {
       return res.status(403).json({
         success: false,
-        message: 'Anda tidak memiliki izin akses untuk tindakan ini.',
+        code: 'PERMISSION_DENIED',
+        message: 'Akses ditolak: Akun Anda tidak memiliki izin untuk melakukan tindakan ini.',
+        requiredPermission: permissionKey,
       });
     }
 
@@ -91,9 +96,17 @@ export const requirePermission = (permissionKey) => {
       return next();
     }
 
+    // 6. Tolak dengan format standar 403 PERMISSION_DENIED
     return res.status(403).json({
       success: false,
-      message: 'Anda tidak memiliki izin akses untuk tindakan ini.',
+      code: 'PERMISSION_DENIED',
+      message: 'Akses ditolak: Akun Anda tidak memiliki izin untuk melakukan tindakan ini.',
+      requiredPermission: permissionKey,
     });
   };
+};
+
+export default {
+  requirePlan,
+  requirePermission,
 };

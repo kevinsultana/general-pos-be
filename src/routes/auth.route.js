@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { register, login, getMe, updateStoreSettings } from '../controllers/auth.controller.js';
+import { switchBranch } from '../controllers/branch.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { requirePermission } from '../middlewares/rbac.middleware.js';
 
 const router = Router();
 
@@ -391,6 +393,49 @@ router.get('/me', authenticate, getMe);
  *       401:
  *         description: Tidak terautentikasi
  */
-router.put('/store-settings', authenticate, updateStoreSettings);
+router.put(
+  '/store-settings',
+  authenticate,
+  requirePermission('settings:manage'),
+  updateStoreSettings
+);
+
+/**
+ * @openapi
+ * /api/auth/switch-branch:
+ *   post:
+ *     summary: Berpindah cabang aktif operasional toko (Protected)
+ *     description: Mengganti cabang aktif dan menerbitkan token JWT baru dengan activeBranchId yang diperbarui.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - branchId
+ *             properties:
+ *               branchId:
+ *                 type: string
+ *                 example: uuid-branch-123
+ *     responses:
+ *       200:
+ *         description: Berhasil beralih ke cabang yang dipilih
+ *       400:
+ *         description: Cabang nonaktif atau parameter tidak valid
+ *       403:
+ *         description: Pengguna tidak memiliki izin penugasan ke cabang ini
+ *       404:
+ *         description: Cabang tidak ditemukan
+ */
+router.post(
+  '/switch-branch',
+  authenticate,
+  switchBranch
+);
 
 export default router;

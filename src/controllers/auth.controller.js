@@ -128,7 +128,7 @@ export const register = async (req, res, next) => {
         },
       });
 
-      return { tenant, branch, role, user };
+      return { tenant, branch, role: ownerRole, user };
     });
 
     const { tenant, branch, user } = transactionResult;
@@ -292,11 +292,31 @@ export const getMe = async (req, res, next) => {
   try {
     const { user, tenant, activeBranchId } = req;
 
-    const branches = (user.userBranches || []).map((ub) => ({
-      id: ub.branch.id,
-      name: ub.branch.name,
-      isMain: ub.branch.isMain,
-    }));
+    let branches = [];
+    if (user.isOwner || user.allBranchesAccess) {
+      const allTenantBranches = await prisma.branch.findMany({
+        where: { tenantId: tenant.id, isActive: true },
+        orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          isMain: true,
+          address: true,
+          phone: true,
+        },
+      });
+      branches = allTenantBranches;
+    } else {
+      branches = (user.userBranches || [])
+        .filter((ub) => ub.branch && ub.branch.isActive)
+        .map((ub) => ({
+          id: ub.branch.id,
+          name: ub.branch.name,
+          isMain: ub.branch.isMain,
+          address: ub.branch.address,
+          phone: ub.branch.phone,
+        }));
+    }
 
     return res.status(200).json({
       success: true,
@@ -307,6 +327,7 @@ export const getMe = async (req, res, next) => {
           email: user.email,
           isOwner: user.isOwner,
           isActive: user.isActive,
+          allBranchesAccess: user.allBranchesAccess,
         },
         tenant: {
           id: tenant.id,

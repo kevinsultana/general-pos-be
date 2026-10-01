@@ -1,4 +1,29 @@
 import prisma from '../lib/prisma.js';
+import {
+  SYSTEM_PERMISSIONS,
+  PERMISSION_GROUPS,
+  getGroupedPermissions,
+} from '../config/permissions.js';
+
+/**
+ * Controller: Mendapatkan daftar seluruh master permissions sistem secara terkelompok
+ * GET /api/roles/permissions
+ */
+export const getMasterPermissions = async (req, res, next) => {
+  try {
+    const grouped = getGroupedPermissions();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        permissions: SYSTEM_PERMISSIONS,
+        grouped,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * Controller: Mendapatkan semua roles di tenant aktif
