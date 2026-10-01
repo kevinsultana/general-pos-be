@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, getMe } from '../controllers/auth.controller.js';
+import { register, login, getMe, updateStoreSettings } from '../controllers/auth.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 
 const router = Router();
@@ -322,5 +322,75 @@ router.post('/login', login);
  *         description: Akun pengguna dinonaktifkan
  */
 router.get('/me', authenticate, getMe);
+
+/**
+ * @openapi
+ * /api/auth/store-settings:
+ *   put:
+ *     summary: Memperbarui Pengaturan / Nama Toko (Protected)
+ *     description: Mengubah nama bisnis atau pengaturan profil toko milik tenant yang sedang aktif.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Toko Berkah Jaya
+ *                 description: Nama baru untuk toko
+ *     responses:
+ *       200:
+ *         description: Pengaturan toko berhasil diperbarui
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Pengaturan toko berhasil diperbarui.
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     tenant:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         name:
+ *                           type: string
+ *                         slug:
+ *                           type: string
+ *                         plan:
+ *                           type: string
+ *                         planStatus:
+ *                           type: string
+ *                         billingCycle:
+ *                           type: string
+ *                         subscriptionExpiresAt:
+ *                           type: string
+ *                         proJoinedAt:
+ *                           type: string
+ *                         createdAt:
+ *                           type: string
+ *                         updatedAt:
+ *                           type: string
+ *       400:
+ *         description: Nama toko wajib diisi
+ *       401:
+ *         description: Tidak terautentikasi
+ */
+router.put('/store-settings', authenticate, updateStoreSettings);
 
 export default router;

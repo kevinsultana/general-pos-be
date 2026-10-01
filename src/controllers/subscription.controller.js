@@ -147,6 +147,23 @@ export const verifyPayment = async (req, res) => {
       const calculatedExpiryDate = new Date();
       calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + expiryDays);
 
+      // Cari tenant saat ini untuk cek status proJoinedAt
+      const currentTenant = await prisma.tenant.findUnique({
+        where: { id: tenant.id },
+      });
+
+      const tenantUpdateData = {
+        plan: targetPlan,
+        planStatus: 'ACTIVE',
+        billingCycle: cycle,
+        subscriptionExpiresAt: calculatedExpiryDate,
+      };
+
+      // Jika paket adalah PRO dan proJoinedAt masih null/kosong, catat tanggal pertama kali upgrade PRO
+      if (targetPlan === 'PRO' && !currentTenant?.proJoinedAt) {
+        tenantUpdateData.proJoinedAt = new Date();
+      }
+
       // Update Database secara Atomic Transaction
       const [updatedPayment, updatedTenant] = await prisma.$transaction([
         prisma.subscriptionPayment.upsert({
@@ -171,12 +188,7 @@ export const verifyPayment = async (req, res) => {
         }),
         prisma.tenant.update({
           where: { id: tenant.id },
-          data: {
-            plan: targetPlan,
-            planStatus: 'ACTIVE',
-            billingCycle: cycle,
-            subscriptionExpiresAt: calculatedExpiryDate,
-          },
+          data: tenantUpdateData,
         }),
       ]);
 
@@ -203,6 +215,9 @@ export const verifyPayment = async (req, res) => {
             planStatus: updatedTenant.planStatus,
             billingCycle: updatedTenant.billingCycle,
             subscriptionExpiresAt: updatedTenant.subscriptionExpiresAt,
+            proJoinedAt: updatedTenant.proJoinedAt,
+            createdAt: updatedTenant.createdAt,
+            updatedAt: updatedTenant.updatedAt,
           },
           payment: {
             orderId: updatedPayment.orderId,
@@ -320,6 +335,18 @@ export const handleWebhook = async (req, res) => {
       const calculatedExpiryDate = new Date();
       calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + expiryDays);
 
+      const tenantUpdateData = {
+        plan: payment.plan,
+        planStatus: 'ACTIVE',
+        billingCycle: payment.billingCycle,
+        subscriptionExpiresAt: calculatedExpiryDate,
+      };
+
+      // Jika paket adalah PRO dan proJoinedAt masih null, catat tanggal pertama kali upgrade PRO
+      if (payment.plan === 'PRO' && !payment.tenant?.proJoinedAt) {
+        tenantUpdateData.proJoinedAt = new Date();
+      }
+
       await prisma.$transaction([
         prisma.subscriptionPayment.update({
           where: { id: payment.id },
@@ -332,12 +359,7 @@ export const handleWebhook = async (req, res) => {
         }),
         prisma.tenant.update({
           where: { id: payment.tenantId },
-          data: {
-            plan: payment.plan,
-            planStatus: 'ACTIVE',
-            billingCycle: payment.billingCycle,
-            subscriptionExpiresAt: calculatedExpiryDate,
-          },
+          data: tenantUpdateData,
         }),
       ]);
     } else {
@@ -382,6 +404,9 @@ export const getSubscriptionStatus = async (req, res) => {
         planStatus: true,
         billingCycle: true,
         subscriptionExpiresAt: true,
+        proJoinedAt: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 

@@ -3,6 +3,25 @@ import prisma from '../lib/prisma.js';
 import { generateToken } from '../lib/jwt.js';
 
 /**
+ * Helper: Format standar objek tenant lengkap untuk konsistensi API
+ */
+const formatTenant = (tenant) => {
+  if (!tenant) return null;
+  return {
+    id: tenant.id,
+    name: tenant.name,
+    slug: tenant.slug,
+    plan: tenant.plan,
+    planStatus: tenant.planStatus,
+    billingCycle: tenant.billingCycle,
+    subscriptionExpiresAt: tenant.subscriptionExpiresAt,
+    proJoinedAt: tenant.proJoinedAt,
+    createdAt: tenant.createdAt,
+    updatedAt: tenant.updatedAt,
+  };
+};
+
+/**
  * Controller: Registrasi Tenant Toko & Akun Pemilik (First User)
  * POST /api/auth/register
  */
@@ -102,18 +121,13 @@ export const register = async (req, res, next) => {
       plan: tenant.plan,
     });
 
-    // 6. Kembalikan Response 201 Created
+    // 6. Kembalikan Response 201 Created dengan data tenant lengkap
     return res.status(201).json({
       success: true,
       message: 'Registrasi toko dan akun pemilik berhasil',
       data: {
         token,
-        tenant: {
-          id: tenant.id,
-          name: tenant.name,
-          slug: tenant.slug,
-          plan: tenant.plan,
-        },
+        tenant: formatTenant(tenant),
         user: {
           id: user.id,
           name: user.name,
@@ -205,17 +219,12 @@ export const login = async (req, res, next) => {
       });
     }
 
-    // 5. Aturan Akses Web vs Mobile
-    // Catatan: Pengguna paket FREE diizinkan login ke Web Dashboard untuk mengakses
-    // menu Profil Toko (/dashboard/store-profile) dan Upgrade Paket (/dashboard/upgrade).
-    // Pembatasan fitur operasional (POS, Transaksi, dll) ditangani di tingkat Web Dashboard.
-
-    // 6. Dapatkan Cabang Aktif User (utamakan cabang utama)
+    // 5. Dapatkan Cabang Aktif User (utamakan cabang utama)
     const mainBranchEntry =
       user.userBranches.find((ub) => ub.branch?.isMain) || user.userBranches[0];
     const activeBranch = mainBranchEntry ? mainBranchEntry.branch : null;
 
-    // 7. Buat JWT Token
+    // 6. Buat JWT Token
     const token = generateToken({
       userId: user.id,
       tenantId: tenant.id,
@@ -225,19 +234,13 @@ export const login = async (req, res, next) => {
       plan: tenant.plan,
     });
 
-    // 8. Kembalikan Response 200 OK
+    // 7. Kembalikan Response 200 OK dengan data tenant lengkap
     return res.status(200).json({
       success: true,
       message: 'Login berhasil',
       data: {
         token,
-        tenant: {
-          id: tenant.id,
-          name: tenant.name,
-          slug: tenant.slug,
-          plan: tenant.plan,
-          planStatus: tenant.planStatus,
-        },
+        tenant: formatTenant(tenant),
         user: {
           id: user.id,
           name: user.name,
@@ -289,6 +292,11 @@ export const getMe = async (req, res, next) => {
           slug: tenant.slug,
           plan: tenant.plan,
           planStatus: tenant.planStatus,
+          billingCycle: tenant.billingCycle,
+          subscriptionExpiresAt: tenant.subscriptionExpiresAt,
+          proJoinedAt: tenant.proJoinedAt,
+          createdAt: tenant.createdAt,
+          updatedAt: tenant.updatedAt,
         },
         role: user.role
           ? {
@@ -306,8 +314,44 @@ export const getMe = async (req, res, next) => {
   }
 };
 
+/**
+ * Controller: Memperbarui Pengaturan / Nama Toko
+ * PUT /api/auth/store-settings (Protected: authenticate)
+ */
+export const updateStoreSettings = async (req, res, next) => {
+  try {
+    const { name } = req.body;
+    const tenantId = req.tenantId || req.tenant?.id;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nama toko wajib diisi.',
+      });
+    }
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        name: name.trim(),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Pengaturan toko berhasil diperbarui.',
+      data: {
+        tenant: formatTenant(updatedTenant),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   register,
   login,
   getMe,
+  updateStoreSettings,
 };

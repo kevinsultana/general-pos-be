@@ -35,6 +35,7 @@ model Tenant {
   planStatus            SubscriptionStatus    @default(ACTIVE)
   billingCycle          String?               // "monthly" | "yearly"
   subscriptionExpiresAt DateTime?
+  proJoinedAt           DateTime?             // Tanggal pertama kali upgrade ke paket PRO
 
   branches              Branch[]
   roles                 Role[]
