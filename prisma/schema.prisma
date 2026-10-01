@@ -284,6 +284,7 @@ model Product {
   orderItems         OrderItem[]
   purchaseOrderItems PurchaseOrderItem[]
   stockOpnameItems   StockOpnameItem[]
+  stockTransferItems StockTransferItem[]
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
