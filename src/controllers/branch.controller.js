@@ -258,9 +258,12 @@ export const switchBranch = async (req, res, next) => {
     const hasAllAccess = user.allBranchesAccess === true;
 
     if (!isOwner && !hasAllAccess) {
-      const isAssigned = user.userBranches?.some(
-        (ub) => ub.branchId === branchId
-      );
+      const isAssigned = await prisma.userBranch.findFirst({
+        where: {
+          userId: user.id,
+          branchId: targetBranch.id,
+        },
+      });
 
       if (!isAssigned) {
         return res.status(403).json({

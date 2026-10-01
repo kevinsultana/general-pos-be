@@ -98,12 +98,9 @@ export const createTransaction = async (req, res) => {
   } catch (error) {
     console.error('[Subscription] Error creating transaction:', error);
 
-    // Tangkap error asli dari Midtrans API agar mudah didiagnosis
-    const midtransError = error.ApiResponse || error.message || error;
     return res.status(500).json({
       success: false,
-      message: error.message || 'Gagal memproses transaksi Midtrans Snap.',
-      errorDetail: midtransError,
+      message: 'Gagal memproses transaksi Midtrans Snap.',
     });
   }
 };
@@ -124,23 +121,80 @@ export const verifyPayment = async (req, res) => {
       });
     }
 
-    // 1. Cek Status Transaksi Langsung ke Midtrans API
+    // 1. Cari data payment terlebih dahulu di database
+    const payment = await prisma.subscriptionPayment.findUnique({
+      where: { orderId },
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Data transaksi pembayaran tidak ditemukan.',
+      });
+    }
+
+    // 2. Kunci Celah IDOR: Wajib Validasi Kepemilikan Transaksi
+    if (payment.tenantId !== tenant.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Order ID bukan milik toko Anda.',
+      });
+    }
+
+    // 3. Idempoten: Jika status transaksi sudah SETTLEMENT, jangan perpanjang berulang
+    if (payment.status === 'SETTLEMENT') {
+      const currentTenant = await prisma.tenant.findUnique({
+        where: { id: tenant.id },
+      });
+
+      const token = generateToken({
+        userId: user.id,
+        tenantId: currentTenant.id,
+        tenantSlug: currentTenant.slug,
+        role: user.role?.name || (user.isOwner ? 'OWNER' : 'KASIR'),
+        activeBranchId: activeBranchId || null,
+        plan: currentTenant.plan,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Pembayaran sudah terverifikasi sebelumnya dan paket langganan aktif.',
+        data: {
+          token,
+          tenant: {
+            id: currentTenant.id,
+            name: currentTenant.name,
+            slug: currentTenant.slug,
+            plan: currentTenant.plan,
+            planStatus: currentTenant.planStatus,
+            billingCycle: currentTenant.billingCycle,
+            subscriptionExpiresAt: currentTenant.subscriptionExpiresAt,
+            proJoinedAt: currentTenant.proJoinedAt,
+            createdAt: currentTenant.createdAt,
+            updatedAt: currentTenant.updatedAt,
+          },
+          payment: {
+            orderId: payment.orderId,
+            status: payment.status,
+            amount: payment.amount,
+            paidAt: payment.paidAt,
+          },
+        },
+      });
+    }
+
+    // 4. Cek Status Transaksi Langsung ke Midtrans API
     const statusResponse = await snap.transaction.status(orderId);
     const { transaction_status, fraud_status, payment_type } = statusResponse;
 
-    // 2. Evaluasi Status Pembayaran
+    // 5. Evaluasi Status Pembayaran
     const isSettled =
       transaction_status === 'settlement' ||
       (transaction_status === 'capture' && fraud_status === 'accept');
 
     if (isSettled) {
-      // Cari record pembayaran untuk mengetahui plan dan billingCycle
-      const payment = await prisma.subscriptionPayment.findUnique({
-        where: { orderId },
-      });
-
-      const targetPlan = (plan || payment?.plan || 'PLUS').toUpperCase();
-      const cycle = payment?.billingCycle || 'yearly';
+      const targetPlan = (plan || payment.plan || 'PLUS').toUpperCase();
+      const cycle = payment.billingCycle || 'yearly';
 
       // Hitung masa aktif langganan: jika monthly (+30 hari), jika yearly (+365 hari)
       const expiryDays = cycle === 'yearly' ? 365 : 30;
@@ -166,20 +220,9 @@ export const verifyPayment = async (req, res) => {
 
       // Update Database secara Atomic Transaction
       const [updatedPayment, updatedTenant] = await prisma.$transaction([
-        prisma.subscriptionPayment.upsert({
+        prisma.subscriptionPayment.update({
           where: { orderId },
-          update: {
-            status: 'SETTLEMENT',
-            paidAt: new Date(),
-            paymentType: payment_type || 'midtrans',
-            rawResponse: statusResponse,
-          },
-          create: {
-            orderId,
-            tenantId: tenant.id,
-            plan: targetPlan,
-            billingCycle: cycle,
-            amount: Math.round(statusResponse.gross_amount || 0),
+          data: {
             status: 'SETTLEMENT',
             paidAt: new Date(),
             paymentType: payment_type || 'midtrans',
@@ -246,11 +289,9 @@ export const verifyPayment = async (req, res) => {
     });
   } catch (error) {
     console.error('[Subscription] Error verifying payment:', error);
-    const midtransError = error.ApiResponse || error.message || error;
     return res.status(500).json({
       success: false,
-      message: error.message || 'Gagal memverifikasi status pembayaran ke Midtrans.',
-      errorDetail: midtransError,
+      message: 'Gagal memverifikasi status pembayaran ke Midtrans.',
     });
   }
 };
@@ -279,7 +320,15 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
-    // Verifikasi Signature Key SHA512
+    // 1. Validasi Keberadaan Signature Key (Tolak langsung jika tidak ada)
+    if (!signature_key) {
+      return res.status(401).json({
+        success: false,
+        message: 'Signature Key wajib disertakan.',
+      });
+    }
+
+    // 2. Verifikasi Signature Hash SHA512 Menggunakan crypto.timingSafeEqual
     const serverKey = (process.env.MIDTRANS_SERVER_KEY || '').trim();
     const rawSignaturePayload = `${order_id}${status_code}${gross_amount}${serverKey}`;
     const expectedSignature = crypto
@@ -287,18 +336,20 @@ export const handleWebhook = async (req, res) => {
       .update(rawSignaturePayload)
       .digest('hex');
 
+    const expectedBuffer = Buffer.from(expectedSignature, 'utf-8');
+    const receivedBuffer = Buffer.from(signature_key, 'utf-8');
+
     if (
-      signature_key &&
-      signature_key !== expectedSignature &&
-      process.env.NODE_ENV === 'production'
+      expectedBuffer.length !== receivedBuffer.length ||
+      !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
     ) {
-      return res.status(403).json({
+      return res.status(401).json({
         success: false,
         message: 'Signature Key tidak valid.',
       });
     }
 
-    // Cari Data Pembayaran
+    // 3. Cari Data Pembayaran di Database
     const payment = await prisma.subscriptionPayment.findUnique({
       where: { orderId: order_id },
       include: { tenant: true },
@@ -308,6 +359,14 @@ export const handleWebhook = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Data transaksi pembayaran tidak ditemukan.',
+      });
+    }
+
+    // 4. Idempoten: Jika status transaksi sudah SETTLEMENT, jangan proses ulang
+    if (payment.status === 'SETTLEMENT') {
+      return res.status(200).json({
+        success: true,
+        message: 'Transaksi sudah terverifikasi sebelumnya.',
       });
     }
 

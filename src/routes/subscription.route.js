@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
+import { subscriptionLimiter } from '../middlewares/rateLimiter.js';
 import {
   createTransaction,
   verifyPayment,
@@ -68,6 +69,7 @@ const router = Router();
 router.post(
   '/create-transaction',
   authenticate,
+  subscriptionLimiter,
   requirePermission('subscriptions:manage'),
   createTransaction
 );

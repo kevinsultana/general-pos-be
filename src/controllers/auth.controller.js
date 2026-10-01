@@ -29,7 +29,7 @@ export const register = async (req, res, next) => {
   try {
     const { storeName, storeSlug, ownerName, email, password } = req.body;
 
-    // 1. Validasi Kelengkapan Field
+    // 1. Validasi Kelengkapan Field Dasar
     if (!storeName || !storeSlug || !ownerName || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -37,10 +37,50 @@ export const register = async (req, res, next) => {
       });
     }
 
-    const normalizedSlug = storeSlug.toLowerCase().trim();
-    const normalizedEmail = email.toLowerCase().trim();
+    const cleanStoreName = typeof storeName === 'string' ? storeName.trim() : '';
+    const cleanOwnerName = typeof ownerName === 'string' ? ownerName.trim() : '';
+    const normalizedSlug = typeof storeSlug === 'string' ? storeSlug.toLowerCase().trim() : '';
+    const normalizedEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
 
-    // 2. Cek apakah storeSlug sudah dipakai di tabel Tenant
+    if (!cleanStoreName || !cleanOwnerName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nama toko dan nama pemilik tidak boleh kosong.',
+      });
+    }
+
+    // 2. Validasi Format storeSlug: regex /^[a-z0-9]+(?:-[a-z0-9]+)*$/ (3 - 30 karakter)
+    const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    if (
+      normalizedSlug.length < 3 ||
+      normalizedSlug.length > 30 ||
+      !slugRegex.test(normalizedSlug)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Format slug toko tidak valid. Harus 3-30 karakter, hanya huruf kecil, angka, dan tanda hubung (-).',
+      });
+    }
+
+    // 3. Validasi Format Email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Format alamat email tidak valid.',
+      });
+    }
+
+    // 4. Validasi Panjang Password (minimal 8 karakter)
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kata sandi minimal 8 karakter.',
+      });
+    }
+
+    // 5. Cek apakah storeSlug sudah dipakai di tabel Tenant
     const existingTenant = await prisma.tenant.findUnique({
       where: { slug: normalizedSlug },
     });
@@ -52,22 +92,22 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // 3. Hash Password
+    // 6. Hash Password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 4. Eksekusi Atomic Transaction via Prisma
+    // 7. Eksekusi Atomic Transaction via Prisma
     const transactionResult = await prisma.$transaction(async (tx) => {
-      // 4a. Buat Tenant baru (default plan: "FREE")
+      // 7a. Buat Tenant baru (default plan: "FREE")
       const tenant = await tx.tenant.create({
         data: {
-          name: storeName.trim(),
+          name: cleanStoreName,
           slug: normalizedSlug,
           plan: 'FREE',
           planStatus: 'ACTIVE',
         },
       });
 
-      // 4b. Buat Branch otomatis ("Cabang Utama", isMain: true)
+      // 7b. Buat Branch otomatis ("Cabang Utama", isMain: true)
       const branch = await tx.branch.create({
         data: {
           tenantId: tenant.id,
@@ -76,7 +116,7 @@ export const register = async (req, res, next) => {
         },
       });
 
-      // 4c. Buat 3 default Roles sekaligus: OWNER, MANAGER, KASIR
+      // 7c. Buat 3 default Roles sekaligus: OWNER, MANAGER, KASIR
       const ownerRole = await tx.role.create({
         data: {
           tenantId: tenant.id,
@@ -107,12 +147,12 @@ export const register = async (req, res, next) => {
         },
       });
 
-      // 4d. Buat User pertama (isOwner: true, relasi ke tenantId dan roleId)
+      // 7d. Buat User pertama (isOwner: true, relasi ke tenantId dan roleId)
       const user = await tx.user.create({
         data: {
           tenantId: tenant.id,
           roleId: ownerRole.id,
-          name: ownerName.trim(),
+          name: cleanOwnerName,
           email: normalizedEmail,
           password: hashedPassword,
           isOwner: true,
@@ -120,7 +160,7 @@ export const register = async (req, res, next) => {
         },
       });
 
-      // 4e. Hubungkan User ke Branch utama via UserBranch
+      // 7e. Hubungkan User ke Branch utama via UserBranch
       await tx.userBranch.create({
         data: {
           userId: user.id,
@@ -133,7 +173,7 @@ export const register = async (req, res, next) => {
 
     const { tenant, branch, user } = transactionResult;
 
-    // 5. Generate JWT Token
+    // 8. Generate JWT Token
     const token = generateToken({
       userId: user.id,
       tenantId: tenant.id,
@@ -143,7 +183,7 @@ export const register = async (req, res, next) => {
       plan: tenant.plan,
     });
 
-    // 6. Kembalikan Response 201 Created dengan data tenant lengkap
+    // 9. Kembalikan Response 201 Created dengan data tenant lengkap
     return res.status(201).json({
       success: true,
       message: 'Registrasi toko dan akun pemilik berhasil',
@@ -307,7 +347,23 @@ export const getMe = async (req, res, next) => {
       });
       branches = allTenantBranches;
     } else {
-      branches = (user.userBranches || [])
+      const userBranchEntries = await prisma.userBranch.findMany({
+        where: { userId: user.id },
+        include: {
+          branch: {
+            select: {
+              id: true,
+              name: true,
+              isMain: true,
+              address: true,
+              phone: true,
+              isActive: true,
+            },
+          },
+        },
+      });
+
+      branches = userBranchEntries
         .filter((ub) => ub.branch && ub.branch.isActive)
         .map((ub) => ({
           id: ub.branch.id,

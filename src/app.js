@@ -1,26 +1,54 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import setupSwagger from './config/swagger.js';
 import apiRouter from './routes/index.js';
+import { apiLimiter } from './middlewares/rateLimiter.js';
 import notFoundHandler from './middlewares/notFound.middleware.js';
 import errorHandler from './middlewares/error.middleware.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware Global
-app.use(cors());
+// 1. Security Headers via Helmet
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Menjaga kompatibilitas Swagger UI inline assets
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
+// 2. Konfigurasi CORS Ketat
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:3000',
+  'http://localhost:3000',
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Izinkan permintaan tanpa origin (seperti mobile app, curl, server-to-server)
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Akses diblokir oleh kebijakan keamanan CORS.'));
+    },
+    credentials: true,
+  })
+);
+
+// 3. Parser Payload Request
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Swagger UI Documentation
+// 4. Swagger UI Documentation
 setupSwagger(app);
 
-// Mount API Routes
-app.use('/api', apiRouter);
+// 5. Mount API Routes dengan Proteksi DDoS Global Rate Limiter
+app.use('/api', apiLimiter, apiRouter);
 
-// 404 & Centralized Error Handlers
+// 6. 404 & Centralized Error Handlers
 app.use(notFoundHandler);
 app.use(errorHandler);
 

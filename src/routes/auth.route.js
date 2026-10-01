@@ -3,6 +3,7 @@ import { register, login, getMe, updateStoreSettings } from '../controllers/auth
 import { switchBranch } from '../controllers/branch.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
+import { authLimiter } from '../middlewares/rateLimiter.js';
 
 const router = Router();
 
@@ -124,7 +125,7 @@ const router = Router();
  *                   type: string
  *                   example: Slug toko sudah digunakan
  */
-router.post('/register', register);
+router.post('/register', authLimiter, register);
 
 /**
  * @openapi
@@ -242,7 +243,7 @@ router.post('/register', register);
  *       404:
  *         description: Toko tidak ditemukan
  */
-router.post('/login', login);
+router.post('/login', authLimiter, login);
 
 /**
  * @openapi

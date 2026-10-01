@@ -36,15 +36,35 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    // Ambil data user beserta tenant, role, dan branch terkait dari database
+    // Optimasi Query Database: Gunakan select spesifik untuk mengurangi beban PostgreSQL
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      include: {
-        tenant: true,
-        role: true,
-        userBranches: {
-          include: {
-            branch: true,
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        email: true,
+        isOwner: true,
+        isActive: true,
+        allBranchesAccess: true,
+        roleId: true,
+        role: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
+          },
+        },
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            plan: true,
+            planStatus: true,
+            billingCycle: true,
+            subscriptionExpiresAt: true,
+            proJoinedAt: true,
           },
         },
       },
@@ -72,10 +92,8 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    // Tentukan activeBranchId (dari payload token atau fallback ke cabang utama user)
-    const mainBranch =
-      user.userBranches.find((ub) => ub.branch?.isMain) || user.userBranches[0];
-    const activeBranchId = decoded.activeBranchId || mainBranch?.branchId || null;
+    // Tentukan activeBranchId dari payload token yang sudah terverifikasi
+    const activeBranchId = decoded.activeBranchId || null;
 
     // Sematkan informasi penting ke objek request
     req.user = user;
