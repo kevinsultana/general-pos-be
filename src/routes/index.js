@@ -5,6 +5,9 @@ import subscriptionRoute from './subscription.route.js';
 import roleRoute from './role.route.js';
 import userRoute from './user.route.js';
 import branchRoute from './branch.route.js';
+import productRoute from './product.route.js';
+import shiftRoute from './shift.route.js';
+import transactionRoute from './transaction.route.js';
 
 const router = Router();
 
@@ -17,5 +20,10 @@ router.use('/subscriptions', subscriptionRoute);
 router.use('/roles', roleRoute);
 router.use('/users', userRoute);
 router.use('/branches', branchRoute);
+
+// POS MVP Routes
+router.use('/products', productRoute);
+router.use('/shifts', shiftRoute);
+router.use('/transactions', transactionRoute);
 
 export default router;
