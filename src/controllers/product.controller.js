@@ -95,7 +95,7 @@ export const createProduct = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, costPrice, price, variants } = req.body;
+    const { name, description, costPrice, price, variants, isActive } = req.body;
 
     if (!branchId) {
       return res.status(400).json({
@@ -142,6 +142,7 @@ export const createProduct = async (req, res, next) => {
         branchId,
         name: name.trim(),
         description: description?.trim() || null,
+        isActive: isActive !== undefined ? Boolean(isActive) : true,
         variants: { create: variantsData },
       },
       include: { variants: true },
@@ -159,17 +160,19 @@ export const createProduct = async (req, res, next) => {
 
 /**
  * PUT /api/products/:id
- * Update produk (nama & deskripsi) — scope by tenant + branch
+ * Update produk (nama, deskripsi, status stok, harga modal & jual varian) — scope by tenant + branch
+ * Transaksi lama tetap aman menggunakan snapshot harga masing-masing.
  */
 export const updateProduct = async (req, res, next) => {
   try {
     const { id } = req.params;
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, isActive } = req.body;
+    const { name, description, isActive, costPrice, price, variants } = req.body;
 
     const existing = await prisma.product.findFirst({
       where: { id, tenantId, ...(branchId ? { branchId } : {}) },
+      include: { variants: true },
     });
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Produk tidak ditemukan.' });
@@ -185,10 +188,113 @@ export const updateProduct = async (req, res, next) => {
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = Boolean(isActive);
 
-    const updated = await prisma.product.update({
-      where: { id },
-      data: updateData,
-      include: { variants: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      // 1. Update data dasar produk
+      await tx.product.update({
+        where: { id },
+        data: updateData,
+      });
+
+      const hasVariantsInput = Array.isArray(variants) && variants.length > 0;
+
+      // 2. Jika input berupa daftar varian dinamis
+      if (hasVariantsInput) {
+        const currentVariants = existing.variants || [];
+        const keptVariantIds = [];
+
+        for (const v of variants) {
+          if (!v.name || !v.name.trim()) {
+            throw new Error('Nama varian tidak boleh kosong.');
+          }
+
+          const vCost = parseFloat(v.costPrice) || 0;
+          const vPrice = parseFloat(v.price) || 0;
+
+          if (v.id && currentVariants.some((cv) => cv.id === v.id)) {
+            // Update varian yang sudah ada (harga baru tersimpan untuk transaksi masa depan)
+            await tx.productVariant.update({
+              where: { id: v.id },
+              data: {
+                name: v.name.trim(),
+                costPrice: vCost,
+                price: vPrice,
+              },
+            });
+            keptVariantIds.push(v.id);
+          } else {
+            // Tambahkan varian baru
+            const createdVar = await tx.productVariant.create({
+              data: {
+                productId: id,
+                name: v.name.trim(),
+                costPrice: vCost,
+                price: vPrice,
+              },
+            });
+            keptVariantIds.push(createdVar.id);
+          }
+        }
+
+        // Hapus varian yang dihapus oleh user jika tidak memiliki referensi transaksi
+        const toDelete = currentVariants.filter((cv) => !keptVariantIds.includes(cv.id));
+        for (const delVar of toDelete) {
+          const hasTxItem = await tx.transactionItem.findFirst({
+            where: { productVariantId: delVar.id },
+          });
+          const hasOrderItem = await tx.orderItem.findFirst({
+            where: { productVariantId: delVar.id },
+          });
+
+          if (!hasTxItem && !hasOrderItem) {
+            await tx.productVariant.delete({ where: { id: delVar.id } });
+          }
+        }
+      } else if (costPrice !== undefined || price !== undefined) {
+        // 3. Jika produk berharga tunggal (single variant, default "Regular")
+        const singleCost = costPrice !== undefined ? (parseFloat(costPrice) || 0) : undefined;
+        const singleSell = price !== undefined ? (parseFloat(price) || 0) : undefined;
+
+        if (existing.variants?.length > 0) {
+          const targetVariant = existing.variants[0];
+          await tx.productVariant.update({
+            where: { id: targetVariant.id },
+            data: {
+              name: 'Regular',
+              ...(singleCost !== undefined ? { costPrice: singleCost } : {}),
+              ...(singleSell !== undefined ? { price: singleSell } : {}),
+            },
+          });
+
+          // Jika sebelumnya ada varian ekstra dan user beralih ke harga tunggal, bersihkan yang bebas transaksi
+          const extraVariants = existing.variants.slice(1);
+          for (const extraVar of extraVariants) {
+            const hasTx = await tx.transactionItem.findFirst({
+              where: { productVariantId: extraVar.id },
+            });
+            const hasOrder = await tx.orderItem.findFirst({
+              where: { productVariantId: extraVar.id },
+            });
+            if (!hasTx && !hasOrder) {
+              await tx.productVariant.delete({ where: { id: extraVar.id } });
+            }
+          }
+        } else {
+          await tx.productVariant.create({
+            data: {
+              productId: id,
+              name: 'Regular',
+              costPrice: singleCost || 0,
+              price: singleSell || 0,
+            },
+          });
+        }
+      }
+
+      // Ambil data produk terbaru beserta variannya
+      return await tx.product.findUnique({
+        where: { id },
+        include: { variants: { orderBy: { name: 'asc' } } },
+      });
     });
 
     return res.status(200).json({

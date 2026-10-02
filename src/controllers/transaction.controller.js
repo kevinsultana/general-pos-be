@@ -29,7 +29,7 @@ export const checkout = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { shiftId, paymentMethod, customerId, customerName, customerPhone, items } = req.body;
+    const { shiftId, paymentMethod, customerId, customerName, customerPhone, items, orderId, orderNumber } = req.body;
 
     // Validasi input
     if (!shiftId) {
@@ -121,7 +121,7 @@ export const checkout = async (req, res, next) => {
 
     // Buat transaksi dalam satu DB transaction
     const transaction = await prisma.$transaction(async (tx) => {
-      return tx.transaction.create({
+      const createdTx = await tx.transaction.create({
         data: {
           tenantId,
           branchId: branchId || shift.branchId,
@@ -144,6 +144,29 @@ export const checkout = async (req, res, next) => {
           },
         },
       });
+
+      // Jika transaksi berasal dari order customer (self-order / barcode scan), tandai Order sebagai COMPLETED
+      if (orderId || orderNumber) {
+        const targetOrder = await tx.order.findFirst({
+          where: {
+            tenantId,
+            ...(orderId ? { id: orderId } : { orderNumber: String(orderNumber).trim().toUpperCase() }),
+            status: 'PENDING',
+          },
+        });
+
+        if (targetOrder) {
+          await tx.order.update({
+            where: { id: targetOrder.id },
+            data: {
+              status: 'COMPLETED',
+              transactionId: createdTx.id,
+            },
+          });
+        }
+      }
+
+      return createdTx;
     });
 
     return res.status(201).json({

@@ -9,12 +9,16 @@ import productRoute from './product.route.js';
 import shiftRoute from './shift.route.js';
 import transactionRoute from './transaction.route.js';
 import customerRoute from './customer.route.js';
+import publicRoute from './public.route.js';
+import orderRoute from './order.route.js';
 
 const router = Router();
 
 /**
  * Registrasi seluruh sub-router aplikasi
  */
+router.use('/public', publicRoute);
+router.use('/orders', orderRoute);
 router.use('/health', healthRoute);
 router.use('/auth', authRoute);
 router.use('/subscriptions', subscriptionRoute);
