@@ -43,6 +43,7 @@ model Tenant {
   payments              SubscriptionPayment[]
   products              Product[]
   shifts                Shift[]
+  customers             Customer[]
 
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -208,6 +209,9 @@ model Transaction {
   tenantId      String
   branchId      String
   shiftId       String
+  customerId    String?
+  customerName  String?
+  customerPhone String?
   receiptNumber String            @unique
   totalAmount   Decimal           @db.Decimal(12, 2)
   totalCost     Decimal           @db.Decimal(12, 2)
@@ -215,10 +219,12 @@ model Transaction {
   createdAt     DateTime          @default(now())
 
   shift         Shift             @relation(fields: [shiftId], references: [id])
+  customer      Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items         TransactionItem[]
 
   @@index([tenantId, branchId])
   @@index([shiftId])
+  @@index([tenantId, customerId])
 }
 
 model TransactionItem {
@@ -234,4 +240,22 @@ model TransactionItem {
 
   transaction      Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   variant          ProductVariant @relation(fields: [productVariantId], references: [id])
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String?
+  email        String?
+  address      String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  transactions Transaction[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
 }

@@ -8,6 +8,7 @@ import branchRoute from './branch.route.js';
 import productRoute from './product.route.js';
 import shiftRoute from './shift.route.js';
 import transactionRoute from './transaction.route.js';
+import customerRoute from './customer.route.js';
 
 const router = Router();
 
@@ -25,5 +26,6 @@ router.use('/branches', branchRoute);
 router.use('/products', productRoute);
 router.use('/shifts', shiftRoute);
 router.use('/transactions', transactionRoute);
+router.use('/customers', customerRoute);
 
 export default router;

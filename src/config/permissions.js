@@ -107,6 +107,20 @@ export const SYSTEM_PERMISSIONS = [
     desc: 'Menambah, mengubah produk, dan penyesuaian stok',
   },
 
+  // Pelanggan (CRM)
+  {
+    key: 'customers:view',
+    group: 'customers',
+    label: 'Lihat Daftar Pelanggan',
+    desc: 'Melihat data pelanggan dan riwayat transaksi mereka',
+  },
+  {
+    key: 'customers:manage',
+    group: 'customers',
+    label: 'Kelola Pelanggan (Tambah/Edit/Hapus)',
+    desc: 'Menambah, mengubah, dan menghapus data pelanggan',
+  },
+
   // Laporan
   {
     key: 'reports:view',
@@ -157,6 +171,11 @@ export const PERMISSION_GROUPS = [
     id: 'inventory',
     name: 'Inventori & Produk',
     description: 'Katalog produk, manajemen stok, dan penyesuaian opname',
+  },
+  {
+    id: 'customers',
+    name: 'Manajemen Pelanggan',
+    description: 'Database pelanggan, riwayat belanja, dan loyalitas',
   },
   {
     id: 'reports',

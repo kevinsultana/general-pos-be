@@ -19,6 +19,9 @@ function generateReceiptNumber() {
  * {
  *   shiftId: string,
  *   paymentMethod: string,   // "CASH" | "QRIS" | "TRANSFER"
+ *   customerId?: string,
+ *   customerName?: string,
+ *   customerPhone?: string,
  *   items: [{ productVariantId: string, quantity: number }]
  * }
  */
@@ -26,7 +29,7 @@ export const checkout = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { shiftId, paymentMethod, items } = req.body;
+    const { shiftId, paymentMethod, customerId, customerName, customerPhone, items } = req.body;
 
     // Validasi input
     if (!shiftId) {
@@ -123,6 +126,9 @@ export const checkout = async (req, res, next) => {
           tenantId,
           branchId: branchId || shift.branchId,
           shiftId,
+          customerId: customerId || null,
+          customerName: customerName?.trim() || null,
+          customerPhone: customerPhone?.trim() || null,
           receiptNumber,
           totalAmount,
           totalCost,
@@ -133,6 +139,9 @@ export const checkout = async (req, res, next) => {
         },
         include: {
           items: true,
+          customer: {
+            select: { id: true, name: true, phone: true },
+          },
         },
       });
     });
@@ -185,6 +194,9 @@ export const getTransactions = async (req, res, next) => {
         where,
         include: {
           items: true,
+          customer: {
+            select: { id: true, name: true, phone: true, email: true },
+          },
           shift: {
             select: {
               id: true,

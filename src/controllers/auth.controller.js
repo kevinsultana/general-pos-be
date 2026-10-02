@@ -116,33 +116,14 @@ export const register = async (req, res, next) => {
         },
       });
 
-      // 7c. Buat 3 default Roles sekaligus: OWNER, MANAGER, KASIR
+      // 7c. Buat role OWNER (satu-satunya role bawaan sistem)
+      // Tenant bebas membuat role kustom sendiri (KASIR, MANAGER, dll.) lewat halaman Kelola Peran
       const ownerRole = await tx.role.create({
         data: {
           tenantId: tenant.id,
           name: 'OWNER',
           description: 'Pemilik Toko dengan akses penuh tanpa batas ke seluruh sistem',
           permissions: ['*'],
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'MANAGER',
-          description: 'Supervisor operasional toko, inventori, laporan, dan staf',
-          permissions: ['pos:*', 'inventory:*', 'reports:*', 'users:view'],
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'KASIR',
-          description: 'Staf kasir untuk transaksi penjualan dan kelola shift POS',
-          permissions: ['pos:access', 'pos:shift'],
           isSystem: true,
         },
       });
