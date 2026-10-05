@@ -14,6 +14,7 @@ import publicRoute from './public.route.js';
 import orderRoute from './order.route.js';
 import promotionRoute from './promotion.route.js';
 import mediaRoute from './media.route.js';
+import syncRoute from './sync.route.js';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use('/users', userRoute);
 router.use('/branches', branchRoute);
 
 // POS MVP Routes
+router.use('/sync', syncRoute);
 router.use('/products', productRoute);
 router.use('/categories', categoryRoute);
 router.use('/shifts', shiftRoute);
