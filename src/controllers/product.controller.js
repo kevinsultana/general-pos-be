@@ -95,7 +95,7 @@ export const createProduct = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, costPrice, price, variants, isActive } = req.body;
+    const { name, description, costPrice, price, variants, isActive, imageUrl } = req.body;
 
     if (!branchId) {
       return res.status(400).json({
@@ -142,6 +142,7 @@ export const createProduct = async (req, res, next) => {
         branchId,
         name: name.trim(),
         description: description?.trim() || null,
+        imageUrl: imageUrl ? imageUrl.trim() : null,
         isActive: isActive !== undefined ? Boolean(isActive) : true,
         variants: { create: variantsData },
       },
@@ -168,7 +169,7 @@ export const updateProduct = async (req, res, next) => {
     const { id } = req.params;
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, isActive, costPrice, price, variants } = req.body;
+    const { name, description, isActive, costPrice, price, variants, imageUrl } = req.body;
 
     const existing = await prisma.product.findFirst({
       where: { id, tenantId, ...(branchId ? { branchId } : {}) },
@@ -187,6 +188,7 @@ export const updateProduct = async (req, res, next) => {
     }
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl ? imageUrl.trim() : null;
 
     const updated = await prisma.$transaction(async (tx) => {
       // 1. Update data dasar produk
@@ -376,3 +378,28 @@ export const updateVariant = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * POST /api/products/upload-image
+ * Upload gambar produk menu ke MinIO.
+ * File diunggah langsung ke S3 MinIO dan mengembalikan `imageUrl`.
+ */
+export const uploadProductImage = async (req, res, next) => {
+  try {
+    if (!req.uploadedUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Upload gagal — file gambar tidak ditemukan.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Gambar produk berhasil diunggah.',
+      data: { imageUrl: req.uploadedUrl },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -36,6 +36,7 @@ export const getStoreCatalog = async (req, res, next) => {
         id: true,
         name: true,
         slug: true,
+        logoUrl: true,
         branches: {
           where: { isActive: true },
           select: {
@@ -97,6 +98,7 @@ export const getStoreCatalog = async (req, res, next) => {
           id: tenant.id,
           name: tenant.name,
           slug: tenant.slug,
+          logoUrl: tenant.logoUrl,
         },
         branches: tenant.branches,
         activeBranch: selectedBranch,

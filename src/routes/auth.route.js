@@ -1,9 +1,17 @@
 import { Router } from 'express';
-import { register, login, getMe, updateStoreSettings } from '../controllers/auth.controller.js';
+import {
+  register,
+  login,
+  getMe,
+  updateStoreSettings,
+  uploadStoreLogo,
+  deleteStoreLogo,
+} from '../controllers/auth.controller.js';
 import { switchBranch } from '../controllers/branch.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
 import { authLimiter } from '../middlewares/rateLimiter.js';
+import { uploadLogoToMinIO } from '../middlewares/upload.middleware.js';
 
 const router = Router();
 
@@ -437,6 +445,60 @@ router.post(
   '/switch-branch',
   authenticate,
   switchBranch
+);
+
+/**
+ * @openapi
+ * /api/auth/store-logo:
+ *   post:
+ *     summary: Upload logo toko ke MinIO (Protected, settings:manage)
+ *     description: Mengunggah file logo (PNG/JPEG/WebP, max 2MB) ke MinIO bucket dan menyimpan URL publiknya ke tenant.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - logo
+ *             properties:
+ *               logo:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Logo berhasil diunggah
+ *       400:
+ *         description: Format/ukuran file tidak valid
+ *       502:
+ *         description: Koneksi MinIO gagal
+ *   delete:
+ *     summary: Hapus logo toko (Protected, settings:manage)
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logo berhasil dihapus
+ */
+router.post(
+  '/store-logo',
+  authenticate,
+  requirePermission('settings:manage'),
+  uploadLogoToMinIO,
+  uploadStoreLogo
+);
+
+router.delete(
+  '/store-logo',
+  authenticate,
+  requirePermission('settings:manage'),
+  deleteStoreLogo
 );
 
 export default router;

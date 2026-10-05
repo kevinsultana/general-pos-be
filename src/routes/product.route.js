@@ -6,9 +6,11 @@ import {
   updateProduct,
   deleteProduct,
   updateVariant,
+  uploadProductImage,
 } from '../controllers/product.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requirePermission } from '../middlewares/rbac.middleware.js';
+import { uploadProductImageToMinIO } from '../middlewares/upload.middleware.js';
 
 const router = Router();
 
@@ -119,6 +121,7 @@ const router = Router();
  */
 router.get('/', authenticate, requirePermission('inventory:view'), getProducts);
 router.post('/', authenticate, requirePermission('inventory:manage'), createProduct);
+router.post('/upload-image', authenticate, requirePermission('inventory:manage'), uploadProductImageToMinIO, uploadProductImage);
 
 /**
  * @openapi

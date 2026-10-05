@@ -16,6 +16,8 @@ const formatTenant = (tenant) => {
     billingCycle: tenant.billingCycle,
     subscriptionExpiresAt: tenant.subscriptionExpiresAt,
     proJoinedAt: tenant.proJoinedAt,
+    logoUrl: tenant.logoUrl ?? null,
+    receiptShowLogo: tenant.receiptShowLogo ?? true,
     createdAt: tenant.createdAt,
     updatedAt: tenant.updatedAt,
   };
@@ -395,12 +397,12 @@ export const getMe = async (req, res, next) => {
 };
 
 /**
- * Controller: Memperbarui Pengaturan / Nama Toko
+ * Controller: Memperbarui Pengaturan / Nama Toko + toggle logo struk
  * PUT /api/auth/store-settings (Protected: authenticate)
  */
 export const updateStoreSettings = async (req, res, next) => {
   try {
-    const { name } = req.body;
+    const { name, receiptShowLogo } = req.body;
     const tenantId = req.tenantId || req.tenant?.id;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -410,11 +412,14 @@ export const updateStoreSettings = async (req, res, next) => {
       });
     }
 
+    const data = { name: name.trim() };
+    if (typeof receiptShowLogo === 'boolean') {
+      data.receiptShowLogo = receiptShowLogo;
+    }
+
     const updatedTenant = await prisma.tenant.update({
       where: { id: tenantId },
-      data: {
-        name: name.trim(),
-      },
+      data,
     });
 
     return res.status(200).json({
@@ -429,9 +434,63 @@ export const updateStoreSettings = async (req, res, next) => {
   }
 };
 
+/**
+ * Controller: Upload Logo Toko ke MinIO
+ * POST /api/auth/store-logo  (Protected: authenticate, settings:manage)
+ * Multipart field: logo (image/png | image/jpeg | image/webp, ≤ 2 MB)
+ */
+export const uploadStoreLogo = async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId || req.tenant?.id;
+
+    // req.uploadedUrl is set by uploadLogoToMinIO middleware
+    if (!req.uploadedUrl) {
+      return res.status(400).json({ success: false, message: 'Upload gagal — file tidak ditemukan.' });
+    }
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { logoUrl: req.uploadedUrl },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logo toko berhasil diunggah.',
+      data: { tenant: formatTenant(updatedTenant) },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Hapus Logo Toko
+ * DELETE /api/auth/store-logo  (Protected: authenticate, settings:manage)
+ */
+export const deleteStoreLogo = async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId || req.tenant?.id;
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { logoUrl: null },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logo toko berhasil dihapus.',
+      data: { tenant: formatTenant(updatedTenant) },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   register,
   login,
   getMe,
   updateStoreSettings,
+  uploadStoreLogo,
+  deleteStoreLogo,
 };

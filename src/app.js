@@ -7,7 +7,6 @@ import apiRouter from './routes/index.js';
 import { apiLimiter } from './middlewares/rateLimiter.js';
 import notFoundHandler from './middlewares/notFound.middleware.js';
 import errorHandler from './middlewares/error.middleware.js';
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
