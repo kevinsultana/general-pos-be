@@ -45,6 +45,7 @@ model Tenant {
   users                 User[]
   payments              SubscriptionPayment[]
   products              Product[]
+  productCategories     ProductCategory[]
   shifts                Shift[]
   customers             Customer[]
   orders                Order[]
@@ -156,23 +157,42 @@ model UserBranch {
 
 // ─── POS MVP Models ───────────────────────────────────────────────────────────
 
+model ProductCategory {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  products  Product[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
 model Product {
-  id          String           @id @default(uuid())
+  id          String            @id @default(uuid())
   tenantId    String
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branchId    String?
-  branch      Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch      Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  categoryId  String?
+  category    ProductCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   name        String
   description String?
   imageUrl    String?
-  isActive    Boolean          @default(true)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   variants    ProductVariant[]
 
   @@index([tenantId])
   @@index([tenantId, branchId])
+  @@index([tenantId, categoryId])
 }
 
 model ProductVariant {

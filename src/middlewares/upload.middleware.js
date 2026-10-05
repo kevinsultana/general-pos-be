@@ -18,22 +18,9 @@
  *   MINIO_PUBLIC_URL – Base URL the browser uses to load images.
  */
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import busboy from 'busboy';
-
-// ── S3 client configured for MinIO ─────────────────────────────────────────
-const s3 = new S3Client({
-  endpoint: `${process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http'}://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000}`,
-  region: 'us-east-1', // MinIO ignores this but SDK requires a value
-  forcePathStyle: true, // required for MinIO
-  credentials: {
-    accessKeyId: process.env.MINIO_ACCESS_KEY || '',
-    secretAccessKey: process.env.MINIO_SECRET_KEY || '',
-  },
-});
-
-const BUCKET = process.env.MINIO_BUCKET || 'omnipos';
-const PUBLIC_URL = (process.env.MINIO_PUBLIC_URL || `http://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000}`).replace(/\/$/, '');
+import { s3, BUCKET, PUBLIC_URL } from '../lib/s3.js';
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 /**

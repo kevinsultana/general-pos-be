@@ -75,21 +75,42 @@ export const getStoreCatalog = async (req, res, next) => {
     }
 
     // 3. Ambil semua produk yang tersedia untuk cabang ini (branchId null atau cocok)
-    const products = await prisma.product.findMany({
-      where: {
-        tenantId: tenant.id,
-        OR: [
-          { branchId: null },
-          { branchId: selectedBranch.id },
-        ],
-      },
-      include: {
-        variants: {
-          orderBy: { price: 'asc' },
+    let products;
+    try {
+      products = await prisma.product.findMany({
+        where: {
+          tenantId: tenant.id,
+          OR: [
+            { branchId: null },
+            { branchId: selectedBranch.id },
+          ],
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        include: {
+          variants: { orderBy: { price: 'asc' } },
+          category: { select: { id: true, name: true, sortOrder: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (queryErr) {
+      // Fallback jika Prisma Client belum di-generate ulang dengan model category
+      if (queryErr.message?.includes('category') || queryErr.message?.includes('Unknown field')) {
+        products = await prisma.product.findMany({
+          where: {
+            tenantId: tenant.id,
+            OR: [
+              { branchId: null },
+              { branchId: selectedBranch.id },
+            ],
+          },
+          include: {
+            variants: { orderBy: { price: 'asc' } },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      } else {
+        throw queryErr;
+      }
+    }
 
     return res.status(200).json({
       success: true,

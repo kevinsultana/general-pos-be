@@ -29,17 +29,33 @@ export const getProducts = async (req, res, next) => {
       ? (Math.max(parseInt(page, 10) || 1, 1) - 1) * (take || 20)
       : undefined;
 
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
+    let products;
+    try {
+      products = await prisma.product.findMany({
         where,
         include: {
           variants: { orderBy: { name: 'asc' } },
+          category: { select: { id: true, name: true, sortOrder: true } },
         },
         orderBy: { createdAt: 'desc' },
         ...(take !== undefined ? { take, skip } : {}),
-      }),
-      prisma.product.count({ where }),
-    ]);
+      });
+    } catch (queryErr) {
+      if (queryErr.message?.includes('category') || queryErr.message?.includes('Unknown field')) {
+        products = await prisma.product.findMany({
+          where,
+          include: {
+            variants: { orderBy: { name: 'asc' } },
+          },
+          orderBy: { createdAt: 'desc' },
+          ...(take !== undefined ? { take, skip } : {}),
+        });
+      } else {
+        throw queryErr;
+      }
+    }
+
+    const total = await prisma.product.count({ where });
 
     const response = { success: true, data: products };
 
@@ -70,10 +86,22 @@ export const getProductById = async (req, res, next) => {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
 
-    const product = await prisma.product.findFirst({
-      where: { id, tenantId, ...(branchId ? { branchId } : {}) },
-      include: { variants: true },
-    });
+    let product;
+    try {
+      product = await prisma.product.findFirst({
+        where: { id, tenantId, ...(branchId ? { branchId } : {}) },
+        include: { variants: true, category: { select: { id: true, name: true } } },
+      });
+    } catch (queryErr) {
+      if (queryErr.message?.includes('category') || queryErr.message?.includes('Unknown field')) {
+        product = await prisma.product.findFirst({
+          where: { id, tenantId, ...(branchId ? { branchId } : {}) },
+          include: { variants: true },
+        });
+      } else {
+        throw queryErr;
+      }
+    }
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Produk tidak ditemukan.' });
@@ -95,7 +123,7 @@ export const createProduct = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, costPrice, price, variants, isActive, imageUrl } = req.body;
+    const { name, description, costPrice, price, variants, isActive, imageUrl, categoryId } = req.body;
 
     if (!branchId) {
       return res.status(400).json({
@@ -143,10 +171,11 @@ export const createProduct = async (req, res, next) => {
         name: name.trim(),
         description: description?.trim() || null,
         imageUrl: imageUrl ? imageUrl.trim() : null,
+        categoryId: categoryId || null,
         isActive: isActive !== undefined ? Boolean(isActive) : true,
         variants: { create: variantsData },
       },
-      include: { variants: true },
+      include: { variants: true, category: { select: { id: true, name: true } } },
     });
 
     return res.status(201).json({
@@ -169,7 +198,7 @@ export const updateProduct = async (req, res, next) => {
     const { id } = req.params;
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { name, description, isActive, costPrice, price, variants, imageUrl } = req.body;
+    const { name, description, isActive, costPrice, price, variants, imageUrl, categoryId } = req.body;
 
     const existing = await prisma.product.findFirst({
       where: { id, tenantId, ...(branchId ? { branchId } : {}) },
@@ -189,6 +218,7 @@ export const updateProduct = async (req, res, next) => {
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = Boolean(isActive);
     if (imageUrl !== undefined) updateData.imageUrl = imageUrl ? imageUrl.trim() : null;
+    if (categoryId !== undefined) updateData.categoryId = categoryId || null;
 
     const updated = await prisma.$transaction(async (tx) => {
       // 1. Update data dasar produk
@@ -295,7 +325,10 @@ export const updateProduct = async (req, res, next) => {
       // Ambil data produk terbaru beserta variannya
       return await tx.product.findUnique({
         where: { id },
-        include: { variants: { orderBy: { name: 'asc' } } },
+        include: {
+          variants: { orderBy: { name: 'asc' } },
+          category: { select: { id: true, name: true } },
+        },
       });
     });
 
