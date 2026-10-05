@@ -29,7 +29,18 @@ export const checkout = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const branchId = req.activeBranchId;
-    const { shiftId, paymentMethod, customerId, customerName, customerPhone, items, orderId, orderNumber } = req.body;
+    const {
+      shiftId,
+      paymentMethod,
+      customerId,
+      customerName,
+      customerPhone,
+      items,
+      orderId,
+      orderNumber,
+      discountAmount,
+      promoCode,
+    } = req.body;
 
     // Validasi input
     if (!shiftId) {
@@ -109,6 +120,69 @@ export const checkout = async (req, res, next) => {
       };
     });
 
+    // Hitung diskon promo jika ada
+    let appliedDiscount = 0;
+    let promoToIncrement = null;
+
+    if (promoCode) {
+      const cleanCode = String(promoCode).trim().toUpperCase();
+      const targetBranchId = branchId || shift.branchId || null;
+
+      // Cari promo yang terikat ke cabang kasir ini (semua promo kini branch-specific)
+      let promoRecord = null;
+      if (targetBranchId) {
+        promoRecord = await prisma.promotion.findFirst({
+          where: { tenantId, code: cleanCode, isActive: true, branchId: targetBranchId },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+      // Fallback: promo lama yang mungkin masih branchId=null (migrasi bertahap)
+      if (!promoRecord) {
+        promoRecord = await prisma.promotion.findFirst({
+          where: { tenantId, code: cleanCode, isActive: true, branchId: null },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      // Cek apakah promo ditemukan dan kuota penggunaan masih tersedia
+      const hasQuota =
+        promoRecord &&
+        (promoRecord.usageLimit === null ||
+          promoRecord.usageLimit === undefined ||
+          promoRecord.usageCount < promoRecord.usageLimit);
+
+      if (hasQuota) {
+        const minReq = parseFloat(promoRecord.minPurchase) || 0;
+        if (minReq === 0 || totalAmount >= minReq) {
+          let eligibleSubtotal = totalAmount;
+          if (
+            promoRecord.scope === 'PRODUCT' &&
+            Array.isArray(promoRecord.scopeVariantIds) &&
+            promoRecord.scopeVariantIds.length > 0
+          ) {
+            eligibleSubtotal = transactionItems
+              .filter((ti) => promoRecord.scopeVariantIds.includes(ti.productVariantId))
+              .reduce((sum, ti) => sum + ti.subtotal, 0);
+          }
+
+          if (eligibleSubtotal > 0) {
+            if (promoRecord.discountType === 'PERCENTAGE') {
+              const raw = (eligibleSubtotal * parseFloat(promoRecord.discountValue)) / 100;
+              const maxD = promoRecord.maxDiscount ? parseFloat(promoRecord.maxDiscount) : null;
+              appliedDiscount = maxD ? Math.min(raw, maxD) : raw;
+            } else {
+              appliedDiscount = Math.min(parseFloat(promoRecord.discountValue), eligibleSubtotal);
+            }
+            promoToIncrement = promoRecord.id;
+          }
+        }
+      }
+    } else if (discountAmount && Number(discountAmount) > 0) {
+      appliedDiscount = Math.min(parseFloat(discountAmount), totalAmount);
+    }
+
+    const finalPayableTotal = Math.max(0, totalAmount - appliedDiscount);
+
     // Generate receipt number yang unik (retry jika tabrakan)
     let receiptNumber;
     let attempts = 0;
@@ -130,7 +204,7 @@ export const checkout = async (req, res, next) => {
           customerName: customerName?.trim() || null,
           customerPhone: customerPhone?.trim() || null,
           receiptNumber,
-          totalAmount,
+          totalAmount: finalPayableTotal,
           totalCost,
           paymentMethod,
           items: {
@@ -144,6 +218,14 @@ export const checkout = async (req, res, next) => {
           },
         },
       });
+
+      // Catat penambahan kuota pemakaian promo
+      if (promoToIncrement) {
+        await tx.promotion.update({
+          where: { id: promoToIncrement },
+          data: { usageCount: { increment: 1 } },
+        });
+      }
 
       // Jika transaksi berasal dari order customer (self-order / barcode scan), tandai Order sebagai COMPLETED
       if (orderId || orderNumber) {

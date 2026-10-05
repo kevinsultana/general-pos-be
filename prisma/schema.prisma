@@ -45,6 +45,7 @@ model Tenant {
   shifts                Shift[]
   customers             Customer[]
   orders                Order[]
+  promotions            Promotion[]
 
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -87,6 +88,7 @@ model Branch {
   shifts       Shift[]
   products     Product[]
   orders       Order[]
+  promotions   Promotion[]
 
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -320,4 +322,50 @@ model OrderItem {
   notes            String?
 
   @@index([orderId])
+}
+
+// ─── Promotion & Discount System ─────────────────────────────────────────────
+
+enum DiscountType {
+  PERCENTAGE   // Persentase (cth: 10%)
+  FIXED        // Nominal tetap (cth: Rp 5.000)
+}
+
+enum PromoScope {
+  ALL          // Berlaku untuk semua produk di keranjang
+  PRODUCT      // Hanya berlaku jika ada produk/varian tertentu di keranjang
+}
+
+model Promotion {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId        String?       // Cabang pemilik promo (null = berlaku di semua cabang)
+  branch          Branch?       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  name            String        // Nama promo, cth: "Diskon 10% Weekend"
+  code            String        // Kode kupon, cth: "DISKON10"
+  description     String?       // Deskripsi singkat promo
+
+  discountType    DiscountType  // PERCENTAGE atau FIXED
+  discountValue   Decimal       @db.Decimal(12, 2)  // Nilai diskon (% atau Rp)
+  maxDiscount     Decimal?      @db.Decimal(12, 2)  // Batas maksimal potongan (untuk PERCENTAGE)
+  minPurchase     Decimal       @default(0) @db.Decimal(12, 2) // Minimum belanja agar promo berlaku
+
+  scope           PromoScope    @default(ALL)        // Cakupan promo
+  // Untuk scope PRODUCT: array variantId yang disyaratkan ada di keranjang
+  scopeVariantIds Json?         // String[] — variantId yang harus ada di cart
+
+  usageLimit      Int?          // Batas total pemakaian promo per cabang / tenant (null = tidak terbatas)
+  usageCount      Int           @default(0)          // Sudah digunakan berapa kali
+
+  isActive        Boolean       @default(true)
+  startDate       DateTime?     // Mulai berlaku (null = langsung aktif)
+  endDate         DateTime?     // Berakhir (null = tidak ada batas waktu)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([tenantId, branchId, isActive])
+  @@index([tenantId, code])
 }

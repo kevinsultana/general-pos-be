@@ -11,6 +11,7 @@ import transactionRoute from './transaction.route.js';
 import customerRoute from './customer.route.js';
 import publicRoute from './public.route.js';
 import orderRoute from './order.route.js';
+import promotionRoute from './promotion.route.js';
 
 const router = Router();
 
@@ -31,5 +32,6 @@ router.use('/products', productRoute);
 router.use('/shifts', shiftRoute);
 router.use('/transactions', transactionRoute);
 router.use('/customers', customerRoute);
+router.use('/promotions', promotionRoute);
 
 export default router;
