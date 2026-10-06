@@ -10,6 +10,10 @@ import errorHandler from './middlewares/error.middleware.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy saat berada di belakang reverse proxy (Nginx, Cloudflare, dll)
+// Mencegah error 'X-Forwarded-For' pada express-rate-limit
+app.set('trust proxy', 1);
+
 // 1. Security Headers via Helmet
 app.use(
   helmet({

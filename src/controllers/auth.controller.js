@@ -265,8 +265,9 @@ export const login = async (req, res, next) => {
     }
 
     // 5. Dapatkan Cabang Aktif User (utamakan cabang utama)
+    const userBranches = user.userBranches || [];
     const mainBranchEntry =
-      user.userBranches.find((ub) => ub.branch?.isMain) || user.userBranches[0];
+      userBranches.find((ub) => ub.branch?.isMain) || userBranches[0];
     const activeBranch = mainBranchEntry ? mainBranchEntry.branch : null;
 
     // 6. Buat JWT Token
